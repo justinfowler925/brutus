@@ -7,7 +7,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Brutus uses a repo-scoped ephemeral runner while the account-level
+    # GitHub-hosted runner billing lock is being corrected by GitHub.
+    runs-on: [self-hosted, macOS, ARM64, brutus-ci]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
