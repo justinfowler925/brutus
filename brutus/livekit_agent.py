@@ -142,6 +142,7 @@ def main() -> None:
     agents.cli.run_app(
         agents.WorkerOptions(
             entrypoint_fnc=entrypoint,
+            host=os.environ.get("BRUTUS_VOICE_HEALTH_HOST", "127.0.0.1"),
             port=int(os.environ.get("BRUTUS_VOICE_HEALTH_PORT", "8096")),
         )
     )
