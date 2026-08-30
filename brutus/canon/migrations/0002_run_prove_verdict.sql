@@ -1,0 +1,3 @@
+-- REV-518: Run.prove_verdict is stored inside the existing JSON data column.
+-- No table DDL is required because the optional Pydantic field makes existing rows
+-- readable as a backward-compatible `null` verdict.

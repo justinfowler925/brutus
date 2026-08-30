@@ -1,0 +1,40 @@
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DEPLOY = ROOT / "scripts" / "deploy.sh"
+
+
+def test_deploy_waits_for_the_replacement_actor_before_probing_surfaces():
+    source = DEPLOY.read_text()
+
+    assert source.index("PRE_RESTART_PID=$(service_pid)") < source.index(
+        'echo "==> syncing the launchd plist"'
+    )
+    assert 'wait_for_new_actor "$PRE_RESTART_PID"' in source
+    assert 'pid != "$old_pid"' not in source  # the executable comparison is POSIX `[ ... ]`
+    assert '[ "$pid" != "$old_pid" ]' in source
+    assert 'stable="$((stable + 1))"' not in source
+    assert 'stable=$((stable + 1))' in source
+    assert '[ "$stable" -ge 2 ]' in source
+    assert "/api/healthz" in source
+
+
+def test_user_facing_endpoints_retry_after_actor_stability():
+    source = DEPLOY.read_text()
+
+    assert 'wait_for_http_200 "http://127.0.0.1:$PORT/session"' in source
+    assert 'wait_for_http_200 "http://127.0.0.1:$PORT/mobile"' in source
+    assert "if wait_for_todos; then" in source
+    assert 'if not isinstance(t, list): raise SystemExit(1)' in source
+
+
+def test_deploy_script_is_valid_bash():
+    result = subprocess.run(
+        ["bash", "-n", str(DEPLOY)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

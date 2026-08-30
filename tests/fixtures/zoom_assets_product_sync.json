@@ -1,0 +1,19 @@
+{
+  "meeting_number": 12345678901,
+  "meeting_uuid": "synthetic-product-sync-001",
+  "start_time": "2026-01-15T16:00:00Z",
+  "topic": "Product sync",
+  "my_notes": {
+    "content_markdown": "## Key Outcomes\n\nThe team agreed to use a synthetic fixture for parser coverage.\n\n## Action Items\n\n- **Alex**: Share the interface review checklist with Casey.\n- **Bailey**: Serve demo publicly.\n- **Bailey + Casey + Drew**: Validate the release checklist.\n- **Casey**: Draft the onboarding notes.\n- **Drew**: Confirm the test environment is ready.\n- **Alex**: Schedule the follow-up review.\n\n## Decisions Made\n\n- Keep customer and employee data out of repository fixtures.\n\n## Open Questions\n\n- How should the public example explain local configuration?\n",
+    "file_id": "synthetic-notes-001",
+    "file_link": "https://docs.zoom.us/doc/synthetic-notes-001",
+    "has_my_notes": true
+  },
+  "meeting_summary": {
+    "has_permission": true,
+    "has_summary": true,
+    "summary_doc_url": "https://docs.zoom.us/doc/synthetic-summary-001",
+    "summary_markdown": "## Meeting summary\n\nA synthetic product sync used only for automated tests.\n\n## Next steps\n\n### Alex Example\n\n- Share the interface review checklist with Casey Example. [https://tasks.zoom.us/synthetic-1](https://tasks.zoom.us/synthetic-1)\n- Schedule the follow-up review. [https://tasks.zoom.us/synthetic-2](https://tasks.zoom.us/synthetic-2)\n\n### Bailey Example\n\n- Serve demo publicly. [https://tasks.zoom.us/synthetic-3](https://tasks.zoom.us/synthetic-3)\n\n### Collaboration\n\n- Team (Bailey, Casey): Validate the release checklist. [https://tasks.zoom.us/synthetic-4](https://tasks.zoom.us/synthetic-4)\n",
+    "summary_plain_text": "Synthetic product sync. Next steps: share the interface checklist, validate the release checklist, and schedule a follow-up."
+  }
+}

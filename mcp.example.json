@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "brutus": {
+      "command": "/bin/zsh",
+      "args": [
+        "-lc",
+        "cd /Users/justinfowler/Projects/brutus && source .venv/bin/activate && exec brutus-mcp"
+      ]
+    }
+  }
+}

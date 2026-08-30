@@ -1,0 +1,26 @@
+name: brutus-ci
+
+on:
+  push:
+    branches: [main, "cursor_m5/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          # Voice is production code and its worker is imported by the suite;
+          # a dev-only install makes the load-bearing transport untestable.
+          pip install -e ".[dev,voice-stream]"
+      - name: Test
+        run: |
+          source .venv/bin/activate
+          pytest -q

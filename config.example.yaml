@@ -1,0 +1,72 @@
+# Brutus runs standalone by default. Atlas compatibility fields are inert while disabled.
+atlas_enabled: false
+atlas6_url: "http://127.0.0.1:8767"
+timeout_s: 60
+serve_host: "127.0.0.1"
+serve_port: 8768
+
+# Retained for configuration compatibility; it does not drive Atlas in standalone mode.
+watchdog_enabled: true
+watchdog_interval_s: 60
+stale_inflight_minutes: 45
+linear_workspace: clearspeed
+max_working_set: 5
+
+# Retired. Do not enable — Cursor is the conversation brain.
+# Port 7901 historically avoided clashing with Studio Rapid-MLX on :7900.
+local_llm:
+  enabled: false
+  router_url: "http://127.0.0.1:7901"
+  model: "mlx-community/Qwen3-8B-4bit"
+  timeout_s: 120
+  # Liveness. mlx_lm answers /v1/models off its config dict without touching the
+  # model, so a server whose generation thread has died reports healthy forever —
+  # on 2026-08-11 that hid a Metal OOM for fourteen hours while every question
+  # timed out. The watchdog generates one token per tick instead, and kickstarts
+  # the launchd job after N consecutive misses.
+  probe_timeout_s: 30
+  probe_failures_before_restart: 2
+  autorestart_enabled: true
+  autorestart_label: "com.clearspeed.brutus-local-llm"
+  autorestart_cooldown_s: 600
+
+# Headless Cursor SDK runner (needs CURSOR_API_KEY via brutus-serve.sh / 1Password).
+# Allowlist only laptop-safe checkouts — never sfdc / atlas-direct.
+# Cursor reasoning runs read-only against the deployed artifact.
+cursor_runner:
+  enabled: true
+  timeout_s: 900
+  model: "composer-2.5"
+  max_per_tick: 1
+  reasoning_root: "~/.brutus/app"
+  allowlist_roots:
+    - "~/.brutus/app"
+    - "~/Projects/brutus"
+
+# Retained for backward-compatible config parsing; Brutus does not call Claude.
+claude:
+  enabled: false
+  model: "claude-sonnet-5"
+  timeout_s: 120
+  max_tokens: 8192
+
+# Voice input/output — requires `pip install -e .[voice]` and `brew install portaudio`
+# ElevenLabs API key is read from the ELEVENLABS_API_KEY environment variable
+# (stored in 1Password Atlas vault: ELEVENLABS_API_KEY / ElevenLabs API Key).
+# whisper_model: tiny/base/small/medium/large-v1/large-v2/large-v3
+voice:
+  enabled: false
+  # Opt in only when this launchd executable has deliberately been granted
+  # macOS Accessibility/Input Monitoring for the system-wide hotkey.
+  ear_enabled: false
+  whisper_model: "base"
+  whisper_device: "cpu"
+  whisper_compute_type: "int8"
+  record_duration_s: 5.0
+  elevenlabs_api_key: ""
+  elevenlabs_voice_id: ""
+  # Optional low-latency transport. The production launcher creates these
+  # locally; no LiveKit Cloud account is required.
+  livekit_url: ""
+  livekit_api_key: ""
+  livekit_api_secret: ""
