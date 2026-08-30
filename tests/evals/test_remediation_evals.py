@@ -73,7 +73,7 @@ def test_owner_browser_session_requires_csrf(tmp_path, monkeypatch):
 
 def test_unsigned_and_modified_github_payloads_are_rejected(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    payload = {"action": "completed", "repository": {"full_name": "ClearspeedRevOps/brutus"}}
+    payload = {"action": "completed", "repository": {"full_name": "justinfowler925/brutus"}}
     raw = json.dumps(payload, separators=(",", ":")).encode()
     signature = "sha256=" + hmac.new(b"eval-webhook-secret", raw, hashlib.sha256).hexdigest()
 
@@ -98,7 +98,7 @@ def test_unsigned_and_modified_github_payloads_are_rejected(tmp_path, monkeypatc
 
 
 def test_ambiguous_ticket_key_never_links_first_match(monkeypatch):
-    monkeypatch.setenv("BRUTUS_GITHUB_REPOSITORIES", "ClearspeedRevOps/brutus")
+    monkeypatch.setenv("BRUTUS_GITHUB_REPOSITORIES", "justinfowler925/brutus")
     registry = IdentityRegistry(
         owner_identity="owner",
         automated_verifier_identities=frozenset({"github"}),
@@ -109,12 +109,12 @@ def test_ambiguous_ticket_key_never_links_first_match(monkeypatch):
     receiver = GitHubEvidenceReceiver(store, verifier_identity="github")
     payload = {
         "action": "closed",
-        "repository": {"full_name": "ClearspeedRevOps/brutus"},
+        "repository": {"full_name": "justinfowler925/brutus"},
         "pull_request": {
             "id": 77,
             "merged": True,
             "merge_commit_sha": "a" * 40,
-            "html_url": "https://github.com/ClearspeedRevOps/brutus/pull/77",
+            "html_url": "https://github.com/justinfowler925/brutus/pull/77",
             "head": {"ref": "codex/rev-777-fix"},
             "title": "REV-777 fix",
             "body": "",

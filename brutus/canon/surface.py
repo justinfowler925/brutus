@@ -249,7 +249,7 @@ def dogfood_pipeline(store: CanonStore, *, marker: str) -> dict[str, Any]:
         work_item=work,
         run=run,
         evidence_type=EvidenceType.DIFF,
-        content_ref="https://github.com/ClearspeedRevOps/brutus/commit/dogfood",
+        content_ref="https://github.com/justinfowler925/brutus/commit/dogfood",
     )
     checks = _attach_verified(
         store,

@@ -17,6 +17,12 @@ def _module():
     return module
 
 
+def test_default_repository_is_the_public_personal_repo(monkeypatch):
+    monkeypatch.delenv("BRUTUS_GITHUB_REPOSITORY", raising=False)
+
+    assert _module().REPOSITORY == "justinfowler925/brutus"
+
+
 def test_poll_captures_pr_and_ci_once(tmp_path, monkeypatch):
     db = tmp_path / "canon.sqlite"
     store = CanonStore(db)
@@ -30,7 +36,7 @@ def test_poll_captures_pr_and_ci_once(tmp_path, monkeypatch):
         if args[:2] == ["pr", "list"]:
             return [{
                 "number": 88,
-                "url": "https://github.com/ClearspeedRevOps/brutus/pull/88",
+                "url": "https://github.com/justinfowler925/brutus/pull/88",
                 "headRefName": "codex/rev-888-trusted-poll",
                 "title": "REV-888 trusted poll",
                 "body": "",
@@ -41,7 +47,7 @@ def test_poll_captures_pr_and_ci_once(tmp_path, monkeypatch):
             "databaseId": 8800,
             "headBranch": "codex/rev-888-trusted-poll",
             "headSha": "a" * 40,
-            "url": "https://github.com/ClearspeedRevOps/brutus/actions/runs/8800",
+            "url": "https://github.com/justinfowler925/brutus/actions/runs/8800",
             "conclusion": "success",
             "status": "completed",
             "workflowName": "brutus-ci",
@@ -59,5 +65,5 @@ def test_poll_captures_pr_and_ci_once(tmp_path, monkeypatch):
     checked.close()
     assert len(evidence) == 2
     assert {row.source_object_id for row in evidence} == {"88", "8800"}
-    assert all(row.source_repository == "ClearspeedRevOps/brutus" for row in evidence)
+    assert all(row.source_repository == "justinfowler925/brutus" for row in evidence)
     assert all(row.source_sha == "a" * 40 for row in evidence)

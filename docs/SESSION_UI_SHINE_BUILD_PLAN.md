@@ -5,7 +5,7 @@
 **Surfaces:** `/session`, `/mobile`, Ops `/` (`ui.py`)  
 **Method:** shine audit rubric + `node ~/Projects/shine/verify/measure.mjs` + Playwright geometry  
 **Verdict:** polish (`/session`, `/mobile`) · redesign-tokens (Ops `/`)  
-**PR:** https://github.com/ClearspeedRevOps/brutus/pull/32
+**Repository:** https://github.com/justinfowler925/brutus
 
 ---
 

@@ -77,7 +77,7 @@ def test_show_renders_linked_review_objects(
         captured_by=WORKER,
         captured_by_kind="worker",
         linked_object_id=work_item.id,
-        content_ref="https://github.com/ClearspeedRevOps/brutus/pull/515",
+        content_ref="https://github.com/justinfowler925/brutus/pull/515",
     )
     decision = Decision(
         question="Which interface?",
