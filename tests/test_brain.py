@@ -1,0 +1,589 @@
+"""The brain: full history in, native tools, gated hands, honest failures."""
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from brutus.brain import (
+    BRAIN_FREE_WRITES,
+    BRAIN_READS,
+    PROPOSABLE,
+    BrainError,
+    anthropic_tools,
+    brain_reply,
+    complete,
+    pack_messages,
+)
+from brutus.config import BrutusCfg, ClaudeCfg, CursorRunnerCfg
+from brutus.gate import GATED
+from brutus.tools import Tool, ToolRegistry, build_default_registry
+
+
+def _cfg() -> BrutusCfg:
+    return BrutusCfg(
+        claude=ClaudeCfg(enabled=True, model="claude-sonnet-5", api_key="k"),
+        cursor_runner=CursorRunnerCfg(enabled=True),
+    )
+
+
+def _registry():
+    return build_default_registry(MagicMock(), _cfg(), read_only=False)
+
+
+def _text_resp(text: str, **usage):
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=text)],
+        stop_reason="end_turn",
+        usage=SimpleNamespace(
+            input_tokens=usage.get("input", 100),
+            output_tokens=usage.get("output", 20),
+            cache_read_input_tokens=usage.get("cache_read", 0),
+            cache_creation_input_tokens=usage.get("cache_write", 0),
+        ),
+    )
+
+
+def _tool_resp(name: str, args: dict, use_id: str = "tu_1"):
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="tool_use", name=name, input=args, id=use_id)],
+        stop_reason="tool_use",
+        usage=SimpleNamespace(
+            input_tokens=100,
+            output_tokens=20,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        ),
+    )
+
+
+def _history(*msgs: tuple[str, str]) -> list[dict]:
+    return [{"role": r, "content": c} for r, c in msgs]
+
+
+# --- the tool surface is the gate, restated ---------------------------------
+
+
+def test_gated_tools_are_never_offered_to_the_model():
+    names = {t["name"] for t in anthropic_tools(_registry())}
+    for gated in GATED:
+        assert gated not in names, f"{gated} must only be reachable via propose_action"
+    assert "propose_action" in names
+    assert "recall" in names
+
+
+def test_reads_and_free_writes_are_offered():
+    names = {t["name"] for t in anthropic_tools(_registry())}
+    for name in (*BRAIN_READS, *BRAIN_FREE_WRITES):
+        assert name in names
+
+
+def test_every_offered_tool_has_a_valid_object_schema():
+    for tool in anthropic_tools(_registry()):
+        schema = tool["input_schema"]
+        assert schema.get("type") == "object", f"{tool['name']} schema is not an object"
+
+
+def test_proposable_matches_the_gate():
+    assert set(PROPOSABLE) == {
+        "organize_agent_thread",
+        "organize_project",
+        "delete_note",
+        "ask_cursor",
+    }
+    assert set(PROPOSABLE) <= set(GATED)
+
+
+# --- the loop ----------------------------------------------------------------
+
+
+def test_a_plain_answer_lands_in_one_round():
+    with patch("brutus.brain._create", return_value=_text_resp("Yeah — it shipped.")):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "did the fix ship?"))
+        )
+    assert reply == "Yeah — it shipped."
+    assert meta["rounds"] == 1
+    assert meta["input_tokens"] == 100
+
+
+def test_the_brain_gets_the_whole_history():
+    seen: dict = {}
+
+    def create(cfg, **kwargs):
+        seen.update(kwargs)
+        return _text_resp("ok")
+
+    history = _history(
+        ("user", "let's talk about the renewal tracker"),
+        ("assistant", "What about it?"),
+        ("user", "is it done"),
+    )
+    with patch("brutus.brain._create", side_effect=create):
+        brain_reply(_cfg(), _registry(), history=history)
+    sent = seen["messages"]
+    assert len(sent) == 3
+    assert sent[0]["content"] == "let's talk about the renewal tracker"
+    assert sent[-1] == {"role": "user", "content": "is it done"}
+
+
+def test_accepting_the_brains_offer_executes_it_without_repeating_or_reasking():
+    looked_up: list[str] = []
+    registry = ToolRegistry()
+    registry.register(
+        Tool(
+            name="list_notes",
+            description="List local notes.",
+            parameters={
+                "type": "object",
+                "properties": {},
+            },
+            fn=lambda: looked_up.append("notes") or {"notes": [{"text": "renewal tracker"}]},
+        )
+    )
+    responses = iter(
+        [
+            _tool_resp("list_notes", {}),
+            _text_resp("The renewal tracker is in your local notes."),
+        ]
+    )
+    calls: list[dict] = []
+
+    def create(cfg, **kwargs):
+        calls.append(kwargs)
+        return next(responses)
+
+    history = _history(
+        ("user", "I wanna know what the fuck I need to be doing right now"),
+        (
+            "assistant",
+            "The renewal tracker may be in your notes. Want me to pull up the note?",
+        ),
+        ("user", "Go ahead. I'm listening"),
+    )
+    with patch("brutus.brain._create", side_effect=create):
+        reply, meta = brain_reply(_cfg(), registry, history=history, channel="voice")
+
+    assert looked_up == ["notes"]
+    assert meta["tools"] == ["list_notes"]
+    assert "stripped_reoffer" not in meta
+    assert "renewal tracker" in reply.lower()
+    assert any("JUSTIN ACCEPTED YOUR IMMEDIATELY PRIOR OFFER" in b["text"] for b in calls[0]["system"])
+    assert "want me" not in reply.lower()
+
+
+def test_accepted_offer_drops_an_amputated_follow_up_question():
+    registry = ToolRegistry()
+    registry.register(
+        Tool(
+            name="get_thread",
+            description="Look up one thread.",
+            parameters={"type": "object", "properties": {"external_id": {"type": "string"}}},
+            fn=lambda external_id="": {"ticket": external_id, "status": "review"},
+        )
+    )
+    responses = iter(
+        [
+            _tool_resp("get_thread", {"external_id": "REV-507"}),
+            _text_resp("REV-507 is in review. Which way you want to"),
+        ]
+    )
+    history = _history(
+        ("assistant", "Want me to pull up REV-507's details?"),
+        ("user", "Go ahead. I'm listening"),
+    )
+    with patch("brutus.brain._create", side_effect=lambda cfg, **kw: next(responses)):
+        reply, meta = brain_reply(_cfg(), registry, history=history, channel="voice")
+
+    assert reply == "REV-507 is in review."
+    assert meta["dropped_incomplete_tail"] is True
+
+
+def test_the_cursor_system_has_no_anthropic_cache_or_effort_fields():
+    seen: dict = {}
+
+    def create(cfg, **kwargs):
+        seen.update(kwargs)
+        return _text_resp("ok")
+
+    with patch("brutus.brain._create", side_effect=create):
+        brain_reply(
+            _cfg(), _registry(), history=_history(("user", "hi")), standing_notes="notes"
+        )
+    system = seen["system"]
+    assert all("cache_control" not in b for b in system)
+    assert "output_config" not in seen
+
+
+def test_voice_turn_gets_a_short_spoken_contract_after_the_cached_system_prompt():
+    seen: dict = {}
+
+    def create(cfg, **kwargs):
+        seen.update(kwargs)
+        return _text_resp("Direct answer.")
+
+    with patch("brutus.brain._create", side_effect=create):
+        brain_reply(_cfg(), _registry(), history=_history(("user", "status")), channel="voice")
+    system = seen["system"]
+    assert "LIVE VOICE TURN" in system[1]["text"]
+    assert "under 45 spoken words" in system[1]["text"]
+
+
+def test_a_tool_round_executes_and_answers_in_one_user_message():
+    responses = iter(
+        [
+            _tool_resp("list_notes", {}),
+            _text_resp("Nothing on the pad."),
+        ]
+    )
+    sent_messages: list = []
+
+    def create(cfg, **kwargs):
+        sent_messages.append(kwargs["messages"])
+        return next(responses)
+
+    with patch("brutus.brain._create", side_effect=create):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "anything on the pad?"))
+        )
+    assert reply == "Nothing on the pad."
+    assert meta["tools"] == ["list_notes"]
+    assert meta["rounds"] == 2
+    # Second call carries assistant tool_use + ONE user message of tool_results.
+    followup = sent_messages[1]
+    assert followup[-1]["role"] == "user"
+    results = followup[-1]["content"]
+    assert isinstance(results, list) and results[0]["type"] == "tool_result"
+
+
+def test_propose_action_drafts_and_never_executes():
+    drafted: list = []
+
+    def on_propose(tool: str, args: dict) -> dict:
+        drafted.append((tool, args))
+        return {"artifact_id": "abc123", "summary": "Approve REV-412"}
+
+    client = MagicMock()
+    registry = build_default_registry(client, _cfg(), read_only=False)
+    responses = iter(
+        [
+            _tool_resp("propose_action", {"tool": "approve_gate", "args": {"ticket": "REV-412"}}),
+            _text_resp("Queued: approve REV-412. Say yes to do it."),
+        ]
+    )
+    with patch("brutus.brain._create", side_effect=lambda cfg, **kw: next(responses)):
+        reply, _meta = brain_reply(
+            _cfg(),
+            registry,
+            history=_history(("user", "approve REV-412")),
+            on_propose=on_propose,
+        )
+    assert drafted == [("approve_gate", {"ticket": "REV-412"})]
+    client.approve.assert_not_called()
+    assert "Say yes" in reply
+
+
+def test_propose_action_refuses_non_gated_tools():
+    responses = iter(
+        [
+            _tool_resp("propose_action", {"tool": "capture_note", "args": {"text": "x"}}),
+            _text_resp("ok"),
+        ]
+    )
+    captured: list = []
+
+    def create(cfg, **kwargs):
+        captured.append(kwargs["messages"])
+        return next(responses)
+
+    with patch("brutus.brain._create", side_effect=create):
+        brain_reply(
+            _cfg(),
+            _registry(),
+            history=_history(("user", "note x")),
+            on_propose=lambda t, a: {"artifact_id": "z"},
+        )
+    result_blocks = captured[1][-1]["content"]
+    assert result_blocks[0]["is_error"] is True
+    assert "not a gated tool" in result_blocks[0]["content"]
+
+
+def test_voice_cannot_propose_keyboard_only_tools():
+    responses = iter(
+        [
+            _tool_resp("propose_action", {"tool": "ask_cursor", "args": {"message": "x"}}),
+            _text_resp("Can't do that from voice."),
+        ]
+    )
+    captured: list = []
+
+    def create(cfg, **kwargs):
+        captured.append(kwargs["messages"])
+        return next(responses)
+
+    with patch("brutus.brain._create", side_effect=create):
+        brain_reply(
+            _cfg(),
+            _registry(),
+            history=_history(("user", "have cursor fix it")),
+            channel="voice",
+            on_propose=lambda t, a: {"artifact_id": "z"},
+        )
+    result_blocks = captured[1][-1]["content"]
+    assert result_blocks[0]["is_error"] is True
+    assert "keyboard-only" in result_blocks[0]["content"]
+
+
+# --- invented tickets: challenge once, then annotate --------------------------
+
+
+def test_an_invented_ticket_is_challenged_then_annotated():
+    responses = iter(
+        [
+            _text_resp("REV-999 is ready to go."),
+            _text_resp("REV-999 is ready to go."),  # doubles down
+        ]
+    )
+    sent: list = []
+
+    def create(cfg, **kwargs):
+        sent.append(kwargs["messages"])
+        return next(responses)
+
+    with patch("brutus.brain._create", side_effect=create):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "carry on"))
+        )
+    # Round two carried the challenge.
+    challenge = sent[1][-1]["content"]
+    assert "REV-999" in challenge and "verify" in challenge
+    assert meta["invented_tickets"] == "REV-999"
+    assert "(unverified)" in reply
+
+
+def test_a_ticket_from_history_is_not_invented():
+    history = _history(
+        ("user", "what about REV-401?"),
+        ("assistant", "REV-401 is with the bots."),
+        ("user", "and now?"),
+    )
+    with patch("brutus.brain._create", return_value=_text_resp("REV-401 landed an hour ago.")):
+        reply, meta = brain_reply(_cfg(), _registry(), history=history)
+    assert "unverified" not in reply
+    assert "invented_tickets" not in meta
+
+
+def test_a_ticket_from_a_tool_result_is_not_invented():
+    client = MagicMock()
+    client.list_threads.return_value = {
+        "threads": [{"external_id": "REV-777", "title": "x", "id": "1"}]
+    }
+    registry = build_default_registry(client, _cfg(), read_only=False)
+    responses = iter(
+        [
+            _tool_resp("list_threads", {}),
+            _text_resp("REV-777 is the only open one."),
+        ]
+    )
+    with patch("brutus.brain._create", side_effect=lambda cfg, **kw: next(responses)):
+        reply, meta = brain_reply(
+            _cfg(), registry, history=_history(("user", "what's open?"))
+        )
+    assert "unverified" not in reply
+    assert "invented_tickets" not in meta
+
+
+# --- failure is honest ---------------------------------------------------------
+
+
+def test_cursor_failure_never_falls_back_to_claude():
+    with (
+        patch("brutus.brain._create", side_effect=RuntimeError("boom")),
+        patch(
+            "brutus.claude.ask_claude",
+            return_value={"ok": True, "reply": "Claude CLI answer."},
+        ) as claude,
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "you there?"))
+        )
+    assert "couldn't finish" in reply
+    assert meta["api_error"] == "brain_service_unavailable"
+    claude.assert_not_called()
+
+
+def test_voice_social_fallback_never_calls_cursor():
+    with (
+        patch("brutus.brain._create", side_effect=RuntimeError("api down")),
+        patch("brutus.cursor_runner.run_cursor_chat") as cursor,
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "you there?")), channel="voice"
+        )
+    cursor.assert_not_called()
+    assert reply == "Hello — I'm here and ready to work."
+    assert meta["fallback"] == "deterministic_social"
+    assert meta["api_error"] == "brain_service_unavailable"
+
+
+def test_voice_brain_failure_keeps_work_status_grounded_without_external_fallback():
+    registry = MagicMock()
+    registry.call.return_value = {
+        "ok": True,
+        "result": {
+            "needs_you": [{"ticket": "REV-507", "title": "Tune voice"}],
+            "next_decision": "REV-507 needs your decision: tune voice.",
+        },
+    }
+    with (
+        patch("brutus.brain._create", side_effect=RuntimeError("api down")),
+        patch("brutus.cursor_runner.run_cursor_chat") as cursor,
+    ):
+        reply, meta = brain_reply(
+            _cfg(), registry,
+            history=_history(("user", "What needs my attention today?")),
+            channel="voice",
+        )
+    assert reply == "REV-507: Needs a decision. Approve or reject?"
+    assert meta["fallback"] == "deterministic_work_surface"
+    registry.call.assert_called_once_with("get_work_surface", {})
+    cursor.assert_not_called()
+
+
+def test_voice_brain_failure_answers_greeting_without_external_fallback():
+    with (
+        patch("brutus.brain._create", side_effect=RuntimeError("api down")),
+        patch("brutus.cursor_runner.run_cursor_chat") as cursor,
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(),
+            history=_history(("user", "Stop. Say hello in one sentence.")),
+            channel="voice",
+        )
+    assert reply == "Hello — I'm here and ready to work."
+    assert meta["fallback"] == "deterministic_social"
+    cursor.assert_not_called()
+
+
+def test_voice_auth_failure_never_exposes_credential_implementation():
+    with patch(
+        "brutus.brain._create",
+        side_effect=RuntimeError("ANTHROPIC_API_KEY missing from 1Password vault"),
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "you there?")), channel="voice"
+        )
+    assert meta["api_error"] == "brain_auth_unavailable"
+    folded = reply.casefold()
+    for forbidden in ("api_key", "api key", "1password", "vault", "credential", "token"):
+        assert forbidden not in folded
+
+
+def test_total_failure_says_so_instead_of_inventing():
+    with (
+        patch("brutus.brain._create", side_effect=RuntimeError("api down")),
+        patch(
+            "brutus.claude.ask_claude",
+            return_value={"ok": False, "error": "claude cli down"},
+        ),
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "you there?"))
+        )
+    assert "Your request is safe" in reply
+    assert meta["api_error"] == "brain_service_unavailable"
+
+
+# --- the one-shot completion path (chat_resolve, refine, summaries) -----------
+
+
+def test_pack_messages_single_user_is_bare_body():
+    system, body = pack_messages(
+        [
+            {"role": "system", "content": "be brief"},
+            {"role": "user", "content": "what needs me"},
+        ]
+    )
+    assert system == "be brief"
+    assert body == "what needs me"
+
+
+def test_complete_uses_cursor_even_when_claude_is_configured():
+    with (
+        patch("brutus.claude.ask_claude", return_value={"ok": True, "reply": "from sonnet"}) as claude,
+        patch(
+            "brutus.cursor_runner.run_cursor_chat",
+            return_value={"ok": True, "reply": "from cursor"},
+        ) as cursor,
+    ):
+        assert complete(_cfg(), [{"role": "user", "content": "hi"}]) == "from cursor"
+    claude.assert_not_called()
+    cursor.assert_called_once()
+
+
+def test_complete_does_not_consult_claude_before_cursor():
+    with (
+        patch("brutus.claude.ask_claude", return_value={"ok": False, "error": "down"}) as claude,
+        patch(
+            "brutus.cursor_runner.run_cursor_chat",
+            return_value={"ok": True, "reply": "from cursor"},
+        ) as cursor,
+    ):
+        assert complete(_cfg(), [{"role": "user", "content": "hi"}]) == "from cursor"
+    cursor.assert_called_once()
+    claude.assert_not_called()
+    assert cursor.call_args.kwargs.get("mutate") is False
+
+
+def test_complete_prefer_cursor_flips_order():
+    with (
+        patch(
+            "brutus.cursor_runner.run_cursor_chat",
+            return_value={"ok": True, "reply": "from cursor"},
+        ) as cursor,
+        patch("brutus.claude.ask_claude") as claude,
+    ):
+        assert (
+            complete(_cfg(), [{"role": "user", "content": "hi"}], prefer="cursor")
+            == "from cursor"
+        )
+    cursor.assert_called_once()
+    claude.assert_not_called()
+
+
+def test_complete_raises_when_cursor_is_disabled():
+    cfg = BrutusCfg(claude=ClaudeCfg(enabled=False), cursor_runner=CursorRunnerCfg(enabled=False))
+    with pytest.raises(BrainError) as exc:
+        complete(cfg, [{"role": "user", "content": "hi"}])
+    assert "cursor" in str(exc.value)
+    assert exc.value.tried == ["cursor"]
+
+
+def test_complete_does_not_call_local_llm():
+    with (
+        patch("brutus.claude.ask_claude", return_value={"ok": True, "reply": "ok"}),
+        patch("brutus.cursor_runner.run_cursor_chat", return_value={"ok": True, "reply": "ok"}),
+        patch("brutus.local_llm.chat_completion") as local,
+    ):
+        complete(_cfg(), [{"role": "user", "content": "hi"}])
+    local.assert_not_called()
+
+
+def test_chat_only_prompt_forbids_edits():
+    from brutus.cursor_runner import build_chat_prompt
+
+    p = build_chat_prompt("what is the gate design", mutate=False)
+    assert "do not create, edit, delete, commit" in p.lower()
+    assert "what is the gate design" in p
+
+
+def test_the_round_cap_fails_honest():
+    with patch(
+        "brutus.brain._create",
+        side_effect=lambda cfg, **kw: _tool_resp("list_notes", {}),
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "loop forever"))
+        )
+    assert meta["error"] == "tool round cap"
+    assert "say it again" in reply

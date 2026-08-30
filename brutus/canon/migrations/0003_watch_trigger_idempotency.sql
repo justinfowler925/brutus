@@ -1,0 +1,3 @@
+-- REV-517: Watch idempotency fields are stored inside the existing JSON data
+-- column. Optional Pydantic fields keep Watches written before this migration
+-- readable with a null last-fired marker, so no table DDL is required.

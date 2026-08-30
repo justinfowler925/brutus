@@ -1,0 +1,57 @@
+"""Contract checks for the browser voice state machine.
+
+These deliberately inspect the shipped client entry point: a helper-only unit test can
+stay green when the page never wires the helper.
+"""
+
+from pathlib import Path
+
+
+SOURCE = (Path(__file__).parents[1] / "brutus/static/session.js").read_text()
+
+
+def test_livekit_is_the_preferred_transport_and_attaches_agent_audio():
+    token = SOURCE.index("/voice-token")
+    fallback = SOURCE.index("startLegacyVoice", token)
+    assert token < fallback
+    assert "https://esm.sh/livekit-client@2.15.13" in SOURCE
+    assert "setMicrophoneEnabled(true)" in SOURCE
+    assert "RoomEvent.TrackSubscribed" in SOURCE
+    assert "track.attach()" in SOURCE
+    assert "RoomEvent.ActiveSpeakersChanged" in SOURCE
+
+
+def test_disabled_or_failed_livekit_falls_back_to_browser_speech():
+    assert 'if (!grant.enabled || !grant.url || !grant.token) return startLegacyVoice()' in SOURCE
+    assert 'startLegacyVoice("Live voice unavailable' in SOURCE
+    assert "const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition" in SOURCE
+
+
+def test_route_teardown_aborts_every_request_and_disconnects_room():
+    start = SOURCE.index("function teardownVoice()")
+    end = SOURCE.index("\n}", start) + 2
+    body = SOURCE[start:end]
+    assert body.count(".abort()") >= 3
+    assert "teardownLiveKit()" in body
+    assert 'window.addEventListener("pagehide", teardownVoice)' in SOURCE
+    assert "sessionStorage.removeItem" in SOURCE
+    assert "teardownVoice();" in SOURCE[SOURCE.index("sessionStorage.removeItem") :]
+    assert "room.disconnect()" in SOURCE
+
+
+def test_all_six_user_visible_voice_states_exist():
+    for phase in ("idle", "listening", "thinking", "buffering", "speaking", "error"):
+        assert f'"{phase}"' in SOURCE
+    assert 'btn.dataset.voiceState = phase' in SOURCE
+    assert '"Preparing reply…"' in SOURCE
+    assert '"Cancel reply and listen"' in SOURCE
+
+
+def test_barge_in_cancels_work_without_inventing_a_user_request():
+    assert 'say("what needs me", "voice")' not in SOURCE
+    start = SOURCE.index("function bargeIn()")
+    end = SOURCE.index("\n}", start) + 2
+    body = SOURCE[start:end]
+    assert "state.sayAbort?.abort()" in body
+    assert "stopSpeaking()" in body
+    assert 'setVoicePhase("listening"' in body

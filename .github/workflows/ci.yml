@@ -1,0 +1,21 @@
+name: brutus-ci
+
+on:
+  push:
+    branches: [main, "cursor_m5/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv venv --python 3.12 .venv
+          # Voice is production code and its worker is imported by the suite;
+          # a dev-only install makes the load-bearing transport untestable.
+          uv pip install --python .venv/bin/python -e ".[dev,voice-stream]"
+      - name: Test
+        run: .venv/bin/pytest -q

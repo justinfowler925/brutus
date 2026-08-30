@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Local runtime state — memory, notes, todos, captured audio. Never committed:
+# these are per-machine and diverge between the laptop and any other host.
+state/
+
+# Secrets
+.env
+config.yaml
+.brutus-deploy.json
+
+# Machine-local editor and generated UI audit artifacts
+.claude/
+shine-diagnosis.json
+shine-usability.json

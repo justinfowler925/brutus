@@ -1,0 +1,19 @@
+{
+  "meeting_number": 12345678902,
+  "meeting_uuid": "synthetic-no-items-001",
+  "start_time": "2026-01-16T13:30:00Z",
+  "topic": "Synthetic empty sync",
+  "my_notes": {
+    "file_id": "synthetic-notes-empty-001",
+    "file_link": "https://docs.zoom.us/doc/synthetic-notes-empty-001",
+    "has_my_notes": true,
+    "content_markdown": "## Key Outcomes\n\nThe meeting ended without assigned work.\n\n## Action Items\n\n- No action items assigned.\n"
+  },
+  "meeting_summary": {
+    "has_permission": true,
+    "has_summary": true,
+    "summary_doc_url": "https://docs.zoom.us/doc/synthetic-summary-empty-001",
+    "summary_markdown": "## Meeting summary\n\nNo commitments were made.\n\n## Next steps\n\n- Next steps were not generated due to insufficient transcript.\n",
+    "summary_plain_text": "No commitments were made."
+  }
+}
