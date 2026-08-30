@@ -10,17 +10,12 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
       - name: Install
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
+          uv venv --python 3.12 .venv
           # Voice is production code and its worker is imported by the suite;
           # a dev-only install makes the load-bearing transport untestable.
-          pip install -e ".[dev,voice-stream]"
+          uv pip install --python .venv/bin/python -e ".[dev,voice-stream]"
       - name: Test
-        run: |
-          source .venv/bin/activate
-          pytest -q
+        run: .venv/bin/pytest -q
