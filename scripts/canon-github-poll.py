@@ -17,7 +17,7 @@ from brutus.github_evidence import GitHubEvidenceReceiver
 from brutus.paths import canon_db_path
 
 
-REPOSITORY = os.environ.get("BRUTUS_GITHUB_REPOSITORY", "ClearspeedRevOps/brutus")
+REPOSITORY = os.environ.get("BRUTUS_GITHUB_REPOSITORY", "justinfowler925/brutus")
 
 
 def gh_json(args: list[str]) -> list[dict]:

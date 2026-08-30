@@ -109,6 +109,6 @@ def verify_github_signature(body: bytes, signature: str | None) -> bool:
 
 def allowed_github_repositories() -> frozenset[str]:
     raw = os.environ.get(
-        "BRUTUS_GITHUB_REPOSITORIES", "ClearspeedRevOps/brutus"
+        "BRUTUS_GITHUB_REPOSITORIES", "justinfowler925/brutus"
     )
     return frozenset(item.strip().lower() for item in raw.split(",") if item.strip())

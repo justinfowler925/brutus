@@ -83,7 +83,7 @@ def _dispatch(store: CanonStore, work_item: WorkItem) -> tuple[HandsResult, Run]
             "sha": TEST_SHA,
             "test_command": "pytest -q",
             "test_exit_code": 0,
-            "pull_request": "https://github.com/ClearspeedRevOps/brutus/pull/514",
+            "pull_request": "https://github.com/justinfowler925/brutus/pull/514",
             "test_output": "pytest -q: 4 passed",
         },
         raw={"wired": True, "atlas_job_id": "atlas-job-514"},
@@ -94,7 +94,7 @@ def _dispatch(store: CanonStore, work_item: WorkItem) -> tuple[HandsResult, Run]
         store,
         actor="conversation:unknown",
         work_item_id=work_item.id,
-        target="github:ClearspeedRevOps/brutus",
+        target="github:justinfowler925/brutus",
         scope="wire Atlas worker dispatch to canon",
     )
 
@@ -137,7 +137,7 @@ def test_dispatch_creates_run_and_persists_worker_artifacts() -> None:
     assert returned.job_id == "atlas-job-514"
     assert run.actor == WORKER
     assert run.work_item_id == work_item.id
-    assert run.target == "github:ClearspeedRevOps/brutus"
+    assert run.target == "github:justinfowler925/brutus"
     assert run.scope == "wire Atlas worker dispatch to canon"
     assert run.started_at <= run.ended_at
     assert run.status == RunStatus.READY_FOR_REVIEW
