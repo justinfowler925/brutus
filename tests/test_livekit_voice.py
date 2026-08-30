@@ -87,6 +87,7 @@ def test_livekit_agent_calls_canonical_session_endpoint():
 def test_launchers_start_real_worker_and_deploy_installs_both_jobs():
     root = Path(__file__).parents[1]
     agent = (root / "scripts/brutus-livekit-agent.sh").read_text()
+    livekit_server = (root / "scripts/brutus-livekit-server.sh").read_text()
     server = (root / "scripts/brutus-serve.sh").read_text()
     deploy = (root / "scripts/deploy.sh").read_text()
     assert "$HOME/fowler-brain/scripts/credential-run" in agent
@@ -95,8 +96,16 @@ def test_launchers_start_real_worker_and_deploy_installs_both_jobs():
     assert "run-with-credential-backoff.sh" in agent
     assert "run-with-credential-backoff.sh" in server
     assert "secrets_softload" not in agent + server
+    assert "--key-file" in livekit_server
+    assert "--keys" not in livekit_server
+    assert "--rtc.tcp_port 0" in livekit_server
     assert "com.clearspeed.brutus-livekit.plist" in deploy
     assert "com.clearspeed.brutus-livekit-agent.plist" in deploy
+
+
+def test_livekit_health_listener_defaults_to_loopback():
+    source = (Path(__file__).parents[1] / "brutus/livekit_agent.py").read_text()
+    assert 'host=os.environ.get("BRUTUS_VOICE_HEALTH_HOST", "127.0.0.1")' in source
 
 
 def test_voice_startup_never_loads_global_input_monitoring_without_opt_in(tmp_path: Path):
