@@ -15,6 +15,13 @@ def test_livekit_is_the_preferred_transport_and_attaches_agent_audio():
     fallback = SOURCE.index("startLegacyVoice", token)
     assert token < fallback
     assert "https://esm.sh/livekit-client@2.15.13" in SOURCE
+
+
+def test_livekit_capture_suppresses_echo_and_background_noise_before_stt():
+    assert "audioCaptureDefaults" in SOURCE
+    assert "echoCancellation: true" in SOURCE
+    assert "noiseSuppression: true" in SOURCE
+    assert "autoGainControl: false" in SOURCE
     assert "setMicrophoneEnabled(true)" in SOURCE
     assert "RoomEvent.TrackSubscribed" in SOURCE
     assert "track.attach()" in SOURCE

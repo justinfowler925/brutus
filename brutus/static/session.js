@@ -617,7 +617,20 @@ async function startVoice() {
     const grant = await response.json();
     if (!grant.enabled || !grant.url || !grant.token) return startLegacyVoice();
     const livekit = await import(LIVEKIT_CLIENT_URL);
-    const room = new livekit.Room({ adaptiveStream: true, dynacast: true });
+    // Suppress the easy part of speaker bleed before it leaves the browser:
+    // echo from Brutus's own TTS, steady background noise, and aggressive gain
+    // pumping. This is not an identity check; owner-only command acceptance is
+    // enforced separately at the voice worker once a local voiceprint exists.
+    const room = new livekit.Room({
+      adaptiveStream: true,
+      dynacast: true,
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: false,
+        channelCount: 1,
+      },
+    });
     state.livekitRoom = room;
     state.livekitStopping = false;
     room.on(livekit.RoomEvent.TrackSubscribed, (track) => {
