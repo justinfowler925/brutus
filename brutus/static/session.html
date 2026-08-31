@@ -25,6 +25,7 @@
     <button type="button" id="mute" aria-pressed="false" aria-label="Toggle spoken replies">
       <span class="label">Speaking on</span>
     </button>
+    <button type="button" id="voice-enroll" aria-label="Enroll your voice">Voice enrollment</button>
     <button type="button" id="new-session" aria-label="Start a new session">New</button>
   </header>
 
@@ -187,6 +188,27 @@
     <span id="board-focus-label"></span>
     <button type="button" id="board-clear" aria-label="Show everything">clear</button>
   </span>
+
+  <dialog id="voice-enrollment" class="voice-enrollment" aria-labelledby="voice-enrollment-title">
+    <form method="dialog" class="enrollment-head">
+      <div>
+        <p class="voice-kicker">Owner-only voice</p>
+        <h2 id="voice-enrollment-title">Enroll your voice</h2>
+      </div>
+      <button value="cancel" aria-label="Close voice enrollment">Close</button>
+    </form>
+    <p id="enrollment-state">Checking enrollment…</p>
+    <p class="enrollment-privacy">Read each line in a normal voice. Brutus stores a local speaker embedding, not these recordings.</p>
+    <ol id="enrollment-prompts" class="enrollment-prompts"></ol>
+    <label class="enrollment-consent">
+      <input id="enrollment-consent" type="checkbox">
+      I consent to Brutus creating a local voice profile for owner-only voice access.
+    </label>
+    <div class="enrollment-actions">
+      <button type="button" id="enrollment-record">Record sample</button>
+      <button type="button" id="enrollment-submit" class="primary" disabled>Enroll my voice</button>
+    </div>
+  </dialog>
 
 </main>
 <script src="/static/session.js"></script>

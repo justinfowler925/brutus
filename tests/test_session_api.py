@@ -42,6 +42,13 @@ def test_open_a_session(client):
     assert r.json()["session"]["title"] == "pricing"
 
 
+def test_voice_enrollment_status_is_available_without_exposing_a_profile(client):
+    r = client.get("/api/voice-enrollment")
+    assert r.status_code == 200
+    assert "enrolled" in r.json()
+    assert "embedding" not in r.json()
+
+
 def test_say_records_both_sides(client):
     sid = client.post("/api/session/open", json={}).json()["session_id"]
     with patch("brutus.conversation.brain_reply", return_value=("Two need you.", {})):

@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -64,6 +64,7 @@ from .ui import BRUTUS_HTML
 from .voice import HAS_WHISPER, save_wav
 from .voice import speak as voice_speak
 from .voice import transcribe as voice_transcribe
+from .voice_identity import EnrollmentError, VoiceIdentity
 from .watchdog import Watchdog
 from .zoom_api import ZoomAPIError, ZoomClient, assets_from_summary, default_window
 from .zoom_ingest import DEFAULT_SOURCE_MODE, ZoomIngestStore, ingest_assets
@@ -268,6 +269,7 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
     cfg = cfg or load_config()
     client = AtlasClient(cfg)
     watchdog = Watchdog(cfg, client)
+    voice_identity = VoiceIdentity()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -420,6 +422,7 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
             await asyncio.sleep(max(15.0, float(cfg.watchdog_interval_s)))
 
     app = FastAPI(title="Brutus", version="0.3.0", lifespan=lifespan)
+    app.state.voice_identity = voice_identity
     app.state.cfg = cfg
     app.state.client = client
     app.state.watchdog = watchdog
@@ -1490,6 +1493,38 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
             .to_jwt()
         )
         return {"enabled": True, "url": voice_cfg.livekit_url, "token": token, "room": room}
+
+    @app.get("/api/voice-enrollment")
+    async def voice_enrollment_status(request: Request) -> dict[str, Any]:
+        """Return only enrollment metadata; the voice embedding never leaves this laptop."""
+        identity: VoiceIdentity = request.app.state.voice_identity
+        return identity.status()
+
+    @app.post("/api/voice-enrollment")
+    async def voice_enroll(
+        request: Request,
+        samples: list[UploadFile] = File(...),
+        consent: bool = Form(False),
+    ) -> dict[str, Any]:
+        """Create the local owner speaker profile from explicit-consent WAV samples."""
+        if not consent:
+            raise HTTPException(status_code=400, detail="Explicit consent is required for voice enrollment.")
+        if len(samples) != 3:
+            raise HTTPException(status_code=400, detail="Record exactly three samples for enrollment.")
+        wav_samples: list[bytes] = []
+        for sample in samples:
+            data = await sample.read()
+            if not data or len(data) > 8 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Each recording must be a non-empty WAV under 8 MB.")
+            wav_samples.append(data)
+        identity: VoiceIdentity = request.app.state.voice_identity
+        try:
+            return await asyncio.to_thread(identity.enroll, wav_samples)
+        except EnrollmentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - model/download failures need a human answer
+            log.exception("voice enrollment failed")
+            raise HTTPException(status_code=503, detail="Voice enrollment could not start. Try again shortly.") from exc
 
     @app.post("/api/session/{session_id}/artifact/{artifact_id}/{decision}")
     async def session_artifact(

@@ -65,7 +65,121 @@ const state = {
   seenTurns: new Set(),
   fields: new Map(),
   pendingQuestion: null,
+  enrollmentSamples: [],
+  enrollmentRecording: false,
 };
+
+const audioCaptureDefaults = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: false,
+  channelCount: 1,
+};
+
+/* --- owner voice enrollment ------------------------------------------- */
+
+const ENROLLMENT_PROMPTS = [
+  "Brutus, this is my owner voice enrollment sample one.",
+  "I use Brutus to move important work forward deliberately.",
+  "Only accept voice commands from me after verification succeeds.",
+];
+
+function encodeWav(chunks, sampleRate) {
+  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const out = new ArrayBuffer(44 + length * 2);
+  const view = new DataView(out);
+  const text = (offset, value) => [...value].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
+  text(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); text(8, "WAVE"); text(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, "data"); view.setUint32(40, length * 2, true);
+  let offset = 44;
+  for (const chunk of chunks) for (const value of chunk) {
+    view.setInt16(offset, Math.max(-1, Math.min(1, value)) * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([out], { type: "audio/wav" });
+}
+
+function renderEnrollment() {
+  const list = $("#enrollment-prompts");
+  if (!list) return;
+  list.textContent = "";
+  ENROLLMENT_PROMPTS.forEach((prompt, index) => {
+    const item = document.createElement("li");
+    item.textContent = `${state.enrollmentSamples[index] ? "Recorded" : "Sample " + (index + 1)} — ${prompt}`;
+    item.dataset.recorded = state.enrollmentSamples[index] ? "true" : "false";
+    list.append(item);
+  });
+  $("#enrollment-record").disabled = state.enrollmentRecording || state.enrollmentSamples.length >= ENROLLMENT_PROMPTS.length;
+  $("#enrollment-record").textContent = state.enrollmentRecording ? "Recording…" : "Record sample";
+  $("#enrollment-submit").disabled = state.enrollmentSamples.length !== ENROLLMENT_PROMPTS.length || !$("#enrollment-consent").checked;
+}
+
+async function recordEnrollmentSample() {
+  if (state.enrollmentRecording || state.enrollmentSamples.length >= ENROLLMENT_PROMPTS.length) return;
+  state.enrollmentRecording = true;
+  renderEnrollment();
+  $("#enrollment-state").textContent = `Reading sample ${state.enrollmentSamples.length + 1} — speak now.`;
+  let stream; let context;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureDefaults });
+    context = new AudioContext();
+    const chunks = [];
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    source.connect(processor); processor.connect(context.destination);
+    await new Promise((resolve) => setTimeout(resolve, 4500));
+    processor.disconnect(); source.disconnect();
+    state.enrollmentSamples.push(encodeWav(chunks, context.sampleRate));
+    $("#enrollment-state").textContent = state.enrollmentSamples.length === ENROLLMENT_PROMPTS.length
+      ? "All samples recorded. Confirm consent, then enroll."
+      : "Sample recorded. Record the next line.";
+  } catch (err) {
+    $("#enrollment-state").textContent = "Microphone access failed. Allow it, then record again.";
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+    await context?.close();
+    state.enrollmentRecording = false;
+    renderEnrollment();
+  }
+}
+
+async function submitEnrollment() {
+  const button = $("#enrollment-submit");
+  button.disabled = true;
+  $("#enrollment-state").textContent = "Building your local speaker profile. This can take a minute the first time.";
+  try {
+    const body = new FormData();
+    state.enrollmentSamples.forEach((sample, index) => body.append("samples", sample, `owner-${index + 1}.wav`));
+    body.append("consent", "true");
+    const response = await fetch("/api/voice-enrollment", { method: "POST", body });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || `server said ${response.status}`);
+    $("#enrollment-state").textContent = "Voice enrolled. Brutus will require this local owner profile for live voice.";
+    $("#voice-enroll .label")?.textContent = "Voice enrolled";
+  } catch (err) {
+    $("#enrollment-state").textContent = `Enrollment did not finish — ${err.message}`;
+    renderEnrollment();
+  }
+}
+
+async function openVoiceEnrollment() {
+  const dialog = $("#voice-enrollment");
+  state.enrollmentSamples = [];
+  renderEnrollment();
+  dialog.showModal();
+  $("#enrollment-state").textContent = "Checking enrollment…";
+  try {
+    const status = await fetch("/api/voice-enrollment").then((r) => r.json());
+    $("#enrollment-state").textContent = status.enrolled
+      ? "Your voice is already enrolled. Recording again replaces the local profile."
+      : "Record all three samples to create your local owner profile.";
+  } catch {
+    $("#enrollment-state").textContent = "Could not check enrollment. You can still try recording.";
+  }
+}
 
 /* --- session ------------------------------------------------------------ */
 
@@ -642,12 +756,7 @@ async function startVoice() {
     const room = new livekit.Room({
       adaptiveStream: true,
       dynacast: true,
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: false,
-        channelCount: 1,
-      },
+      audioCaptureDefaults,
     });
     state.livekitRoom = room;
     // Claim spoken output before connecting. A fast reply event during the
@@ -1101,6 +1210,11 @@ function init() {
     teardownVoice();
     await openSession();
   });
+
+  $("#voice-enroll")?.addEventListener("click", openVoiceEnrollment);
+  $("#enrollment-record")?.addEventListener("click", recordEnrollmentSample);
+  $("#enrollment-submit")?.addEventListener("click", submitEnrollment);
+  $("#enrollment-consent")?.addEventListener("change", renderEnrollment);
 
   $("#ideas-add")?.addEventListener("submit", async (e) => {
     e.preventDefault();

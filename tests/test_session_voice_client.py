@@ -33,6 +33,15 @@ def test_voice_instructions_live_in_help_and_supervisor_names_providers():
     assert "Most recent:" in SOURCE
 
 
+def test_owner_voice_enrollment_is_a_visible_record_and_consent_flow():
+    html = (Path(__file__).parents[1] / "brutus/static/session.html").read_text()
+    assert 'id="voice-enroll"' in html
+    assert 'id="voice-enrollment"' in html
+    assert 'id="enrollment-consent"' in html
+    assert 'fetch("/api/voice-enrollment", { method: "POST", body })' in SOURCE
+    assert "encodeWav" in SOURCE
+
+
 def test_workspace_disclosure_releases_the_fixed_conversation_layout():
     assert '$("#work-tray")?.addEventListener("toggle"' in SOURCE
     assert 'classList.toggle("workspace-open", open)' in SOURCE
