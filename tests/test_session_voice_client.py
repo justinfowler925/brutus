@@ -10,6 +10,12 @@ from pathlib import Path
 SOURCE = (Path(__file__).parents[1] / "brutus/static/session.js").read_text()
 
 
+def test_direct_session_link_opens_the_named_proposal_session():
+    assert 'new URLSearchParams(window.location.search).get("session")' in SOURCE
+    assert 'sessionStorage.setItem("brutus.session", requested)' in SOURCE
+    assert "return hydrate(requested)" in SOURCE
+
+
 def test_livekit_is_the_preferred_transport_and_attaches_agent_audio():
     token = SOURCE.index("/voice-token")
     fallback = SOURCE.index("startLegacyVoice", token)

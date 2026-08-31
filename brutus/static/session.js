@@ -70,6 +70,16 @@ const state = {
 /* --- session ------------------------------------------------------------ */
 
 async function openSession() {
+  // A direct session link is the handoff mechanism for a specific proposal or
+  // voice task. It deliberately wins over the browser's previous session.
+  const requested = new URLSearchParams(window.location.search).get("session");
+  if (requested && /^[0-9a-f]{12}$/i.test(requested)) {
+    const ok = await fetch(`/api/session/${requested}`).then((r) => r.ok).catch(() => false);
+    if (ok) {
+      sessionStorage.setItem("brutus.session", requested);
+      return hydrate(requested);
+    }
+  }
   const saved = sessionStorage.getItem("brutus.session");
   if (saved) {
     const ok = await fetch(`/api/session/${saved}`).then((r) => r.ok).catch(() => false);
