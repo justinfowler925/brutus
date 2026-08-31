@@ -1323,6 +1323,34 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; }
   border-bottom: 1px solid var(--shine-color-border);
 }
 
+.help-balloon-trigger {
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--shine-color-border);
+  border-radius: var(--shine-radius-full);
+  background: transparent;
+  color: var(--shine-color-fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.help-balloon {
+  max-width: 22rem;
+  margin: auto;
+  padding: var(--shine-space-3);
+  border: 1px solid var(--shine-color-border);
+  border-radius: var(--shine-radius-md);
+  background: var(--shine-color-bg-subtle);
+  box-shadow: var(--shine-shadow-lg);
+  color: var(--shine-color-fg);
+  font-size: var(--shine-text-sm);
+  line-height: var(--shine-leading-relaxed);
+}
+
+.help-balloon::backdrop { background: transparent; }
+
 .voice-presence {
   display: flex;
   align-items: center;

@@ -16,6 +16,15 @@ def test_direct_session_link_opens_the_named_proposal_session():
     assert "return hydrate(requested)" in SOURCE
 
 
+def test_voice_instructions_live_in_help_and_supervisor_names_providers():
+    html = (Path(__file__).parents[1] / "brutus/static/session.html").read_text()
+    assert 'popovertarget="voice-help"' in html
+    assert 'id="voice-help"' in html
+    assert "Talk naturally. Pause when you are done." not in SOURCE
+    assert 'const providerCounts = ["codex", "cursor", "claude"]' in SOURCE
+    assert "Most recent:" in SOURCE
+
+
 def test_livekit_is_the_preferred_transport_and_attaches_agent_audio():
     token = SOURCE.index("/voice-token")
     fallback = SOURCE.index("startLegacyVoice", token)

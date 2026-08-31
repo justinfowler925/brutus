@@ -884,7 +884,7 @@ function setVoicePhase(phase, detail = "") {
     btn.setAttribute("aria-label", "Stop reading");
     btn.setAttribute("aria-pressed", "true");
     if (stateLabel) stateLabel.textContent = "Brutus is speaking";
-    if (stateDetail) stateDetail.textContent = "Interrupt whenever you need to redirect him.";
+    if (stateDetail) stateDetail.textContent = "Reply in progress.";
     setStatus("Speaking…");
   } else if (phase === "thinking" || phase === "buffering") {
     glyph.textContent = "■";
@@ -900,7 +900,7 @@ function setVoicePhase(phase, detail = "") {
     btn.setAttribute("aria-label", "Stop listening");
     btn.setAttribute("aria-pressed", "true");
     if (stateLabel) stateLabel.textContent = "Listening";
-    if (stateDetail) stateDetail.textContent = detail || "Talk naturally. Pause when you are done.";
+    if (stateDetail) stateDetail.textContent = detail || "Microphone open.";
     setStatus(detail || "Listening…");
   } else if (phase === "error") {
     glyph.textContent = "!";
@@ -916,7 +916,7 @@ function setVoicePhase(phase, detail = "") {
     btn.setAttribute("aria-label", "Start voice conversation");
     btn.setAttribute("aria-pressed", "false");
     if (stateLabel) stateLabel.textContent = "Ready when you are";
-    if (stateDetail) stateDetail.textContent = "Ask what matters, redirect work, or think out loud.";
+    if (stateDetail) stateDetail.textContent = "Voice is off.";
     setStatus("");
   }
 }
@@ -933,18 +933,24 @@ function renderSupervisor(payload) {
   const nextEl = $("#supervisor-next");
   const evidenceEl = $("#supervisor-evidence");
   const host = $("#supervisor-agents");
+  const providerCounts = ["codex", "cursor", "claude"]
+    .map((provider) => [provider, Number(counts[provider] || sessions.filter((s) => (s.surface || s.provider) === provider).length)])
+    .filter(([, total]) => total > 0)
+    .map(([provider, total]) => `${total} ${provider}`)
+    .join(" · ");
+  const newest = sessions[0] || null;
   const liveCount = String(counts.live ?? sessions.filter((s) => s.live).length ?? "");
   if (count) count.textContent = liveCount;
   if (detailCount) detailCount.textContent = liveCount;
   if (stateEl) {
     stateEl.textContent = assessment?.should_intervene
-      ? assessment.intervention_reason || "One session needs you"
-      : `${sessions.length} recent sessions observed · nothing needs interrupting`;
+      ? `${assessment.session?.surface || assessment.session?.provider || "agent"} · ${assessment.session?.title || "a session needs you"}`
+      : (providerCounts || "No agent sessions found");
   }
   if (nextEl) {
     nextEl.textContent = assessment?.should_intervene
       ? assessment.recommended_next_action || ""
-      : "I’ll stay quiet until the work changes in a way that needs judgment.";
+      : (newest ? `Most recent: ${newest.title || "Untitled session"} · ${String(newest.state || "unknown").replaceAll("_", " ")}` : "");
   }
   if (evidenceEl) {
     const evidence = Array.isArray(assessment?.evidence) ? assessment.evidence : [];

@@ -35,8 +35,12 @@
         <div>
           <p class="voice-kicker">Brutus is with you</p>
           <h2 id="voice-state-label">Ready when you are</h2>
-          <p id="voice-state-detail">Ask what matters, redirect work, or think out loud.</p>
+          <p id="voice-state-detail">Voice is off.</p>
         </div>
+      </div>
+      <button type="button" class="help-balloon-trigger" popovertarget="voice-help" aria-label="Voice help">?</button>
+      <div id="voice-help" class="help-balloon" popover>
+        Start voice to talk naturally, interrupt Brutus, or say “capture” to save a thought. Text works too.
       </div>
       <button type="button" id="mic" class="mic voice-primary" data-testid="voice-control"
               aria-label="Start voice conversation" aria-pressed="false">
