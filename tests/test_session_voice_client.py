@@ -16,6 +16,14 @@ def test_direct_session_link_opens_the_named_proposal_session():
     assert "return hydrate(requested)" in SOURCE
 
 
+def test_an_approved_proposal_lands_its_returned_state_without_waiting_for_sse():
+    start = SOURCE.index("async function settleProposal")
+    end = SOURCE.index("\n}\n\n/* --- saying things", start)
+    body = SOURCE[start:end]
+    assert "const result = await response.json()" in body
+    assert "if (artifact) renderProposal(artifact)" in body
+
+
 def test_voice_instructions_live_in_help_and_supervisor_names_providers():
     html = (Path(__file__).parents[1] / "brutus/static/session.html").read_text()
     assert 'popovertarget="voice-help"' in html

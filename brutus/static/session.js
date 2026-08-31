@@ -476,9 +476,17 @@ function renderProposal(artifact) {
 async function settleProposal(artifactId, decision, row) {
   row.querySelectorAll("button").forEach((b) => (b.disabled = true));
   try {
-    await fetch(`/api/session/${state.sessionId}/artifact/${artifactId}/${decision}`, {
+    const response = await fetch(`/api/session/${state.sessionId}/artifact/${artifactId}/${decision}`, {
       method: "POST",
     });
+    if (!response.ok) throw new Error(`server said ${response.status}`);
+    // The server publishes the settled event, but an EventSource may reconnect
+    // while a slow approved action is running. Land the returned result here as
+    // well so "Do it" can never remain disabled after the write completed.
+    const result = await response.json();
+    const artifact = result.artifact || null;
+    if (artifact) renderProposal(artifact);
+    else await hydrate(state.sessionId);
   } catch (err) {
     setStatus(`Couldn't ${decision} that — ${err.message}`);
     row.querySelectorAll("button").forEach((b) => (b.disabled = false));
