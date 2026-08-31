@@ -665,6 +665,30 @@ def _compile_unfog_work(**kwargs: Any) -> dict[str, Any]:
         acceptance=tuple(kwargs.pop("acceptance", ()) or ()),
         delivery=kwargs.pop("delivery", ""),
     )
+    # A ticket recommendation is only useful if "new" has been checked against
+    # the live ledger and local in-flight sessions.  Callers may supply their
+    # own evidence (for replay/tests), otherwise this read-only compiler owns
+    # the preflight before it ever returns draft_new_ticket.
+    title = str(kwargs.get("draft_title") or contract.outcome).strip()
+    if "existing_tickets" not in kwargs and title:
+        kwargs["existing_tickets"] = find_linear_ticket_candidates(title)
+    if "active_work" not in kwargs and title:
+        normalized = {title.casefold(), contract.outcome.casefold()}
+        active = next(
+            (
+                row for row in scan_agent_sessions()
+                if row.get("live")
+                and str(row.get("title") or "").strip().casefold() in normalized
+            ),
+            None,
+        )
+        if active:
+            kwargs["active_work"] = {
+                "work_id": str(active.get("id") or ""),
+                "matches_contract": True,
+                "status": "running",
+                "evidence": "live provider session with exact title",
+            }
     decision = compile_work(contract, **kwargs)
     return {"ok": True, "decision": asdict(decision)}
 

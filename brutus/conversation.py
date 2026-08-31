@@ -35,6 +35,7 @@ from .intent_contract import compile_proposal
 from .memory import MemoryStore
 from .session import SessionStore
 from .speechify import speechify
+from .ticket_intake import compile_ticket_intake, intake_question
 from .todos import TodoStore
 from .tools import build_default_registry
 
@@ -191,6 +192,14 @@ class ConversationManager:
         if _SILENCE_RE.match(message):
             return TurnResult(session_id, "fast", "", "", turn.id)
 
+        # Explicit, labelled ticket contracts do not need a conversational
+        # model to rediscover their shape.  Compiling them here fixes the
+        # fragile Cursor text-tool boundary while preserving the exact same
+        # Unfog decision and approval artifact used by every other write.
+        ticket = self._ticket_intake(session_id, channel, turn.id)
+        if ticket is not None:
+            return ticket
+
         if wait:
             return self._brain_now(session_id, message, turn.id, channel=channel)
         return self._start_brain(session_id, message, turn.id, channel=channel)
@@ -216,6 +225,43 @@ class ConversationManager:
         if len(reply) > 120:
             reply = f"{reply[:117]}…"
         return self._land(session_id, "fast", reply, turn_id, tool="capture_note")
+
+    def _ticket_intake(self, session_id: str, channel: str, turn_id: int) -> TurnResult | None:
+        intake = compile_ticket_intake(
+            self.store.history_for_model(session_id, keep=_HISTORY_KEEP)
+        )
+        if not intake.requested:
+            return None
+        if not intake.ready:
+            return self._land(session_id, "fast", intake_question(intake), turn_id)
+
+        compiled = self._registry().call("compile_unfog_work", intake.args())
+        result = compiled.get("result") if compiled.get("ok") else None
+        if not isinstance(result, dict) or not result.get("ok"):
+            detail = (result or compiled).get("error") if isinstance(result or compiled, dict) else "unknown error"
+            return self._land(
+                session_id, "fast", f"I couldn't verify duplicate work for that ticket: {detail}.", turn_id,
+                tool="compile_unfog_work", error="ticket_preflight_failed",
+            )
+        decision = result.get("decision") if isinstance(result.get("decision"), dict) else {}
+        action = str(decision.get("action") or "")
+        if action == "continue":
+            return self._land(session_id, "fast", str(decision.get("reason") or "Matching work is already in flight."), turn_id, tool="compile_unfog_work")
+        if action == "update_existing":
+            return self._land(session_id, "fast", str(decision.get("reason") or "An exact open ticket already exists."), turn_id, tool="compile_unfog_work")
+        if action != "draft_new_ticket":
+            return self._land(session_id, "fast", str(decision.get("reason") or "That ticket needs one material decision first."), turn_id, tool="compile_unfog_work")
+
+        args = intake.args()
+        proposal_args = {key: value for key, value in args.items() if key not in {"draft_title"}}
+        try:
+            draft = self._on_propose(session_id, channel)("create_linear_ticket", proposal_args)
+        except Exception as exc:  # noqa: BLE001 -- nothing has crossed the approval boundary
+            return self._land(session_id, "fast", f"I couldn't prepare that ticket proposal: {exc}", turn_id, error="ticket_proposal_failed")
+        return self._land(
+            session_id, "fast", f"{draft['summary']}. Say yes to do it.", turn_id,
+            tool="create_linear_ticket",
+        )
 
     def _emit_idea(self, session_id: str, result: dict[str, Any] | None) -> None:
         """Push Ideas-pad changes to the screen. Reserved bus id mirrors board."""

@@ -3,7 +3,7 @@
 import inspect
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -265,6 +265,43 @@ def test_the_brains_proposal_hook_drafts_a_real_artifact(mgr):
     assert art["state"] == "draft"
     assert art["args"] == {"ticket": "REV-9"}
     assert any(k == "proposal" for k, _ in mgr.events)
+
+
+def test_complete_labelled_ticket_intake_compiles_then_drafts_without_cursor(mgr):
+    sid = mgr.store.open_session()
+    registry = MagicMock()
+    registry.call.return_value = {
+        "ok": True,
+        "result": {"ok": True, "decision": {"action": "draft_new_ticket"}},
+    }
+    message = (
+        "new ticket:\n"
+        "title: Voice intake\n"
+        "outcome: Draft a ticket from an explicit voice contract\n"
+        "target: Brutus voice surface\n"
+        "premise: Cursor text tool calls can fail\n"
+        "scope: Explicit labelled ticket contracts\n"
+        "preservation: Existing approval gate\n"
+        "acceptance: Draft exists; no mutation before yes\n"
+        "delivery: Test and deploy"
+    )
+    with patch.object(mgr, "_registry", return_value=registry), _brain() as brain:
+        result = mgr.handle(sid, message, wait=True)
+    brain.assert_not_called()
+    registry.call.assert_called_once_with("compile_unfog_work", ANY)
+    artifact = mgr.store.artifacts(sid)[-1]
+    assert artifact["tool"] == "create_linear_ticket"
+    assert artifact["state"] == "draft"
+    assert "Say yes to do it" in result.reply
+
+
+def test_incomplete_explicit_ticket_contract_gets_one_focused_question_without_cursor(mgr):
+    sid = mgr.store.open_session()
+    with _brain() as brain:
+        result = mgr.handle(sid, "draft a ticket: outcome: Make voice intake reliable", wait=True)
+    brain.assert_not_called()
+    assert "target, premise, scope, preservation, acceptance, delivery" in result.reply
+    assert mgr.store.artifacts(sid) == []
 
 
 def test_a_settled_artifact_cannot_execute_twice(mgr):
