@@ -71,6 +71,10 @@ _INCOMPLETE_TAIL_RE = re.compile(
 )
 
 _NOT_FOUND = "Sorry, I can't find that shit."
+_UNBACKED_ACTION_CLAIM = re.compile(
+    r"\b(?:queued|drafted|proposal (?:is )?(?:ready|queued)|say yes to do it)\b",
+    re.IGNORECASE,
+)
 
 
 class BrainError(Exception):
@@ -503,6 +507,7 @@ def brain_reply(
     # below can never launder an invented id into its own allowed set.
     allowed = _ticket_ids(*[m.get("content") for m in messages], standing_notes)
     challenged = False
+    challenged_action_claim = False
 
     for _ in range(_MAX_ROUNDS):
         meta["rounds"] += 1
@@ -528,6 +533,33 @@ def brain_reply(
             if completed != reply:
                 meta["dropped_incomplete_tail"] = True
                 reply = completed
+            unbacked_action = (
+                "propose_action" not in meta["tools"]
+                and bool(_UNBACKED_ACTION_CLAIM.search(reply))
+            )
+            if unbacked_action and not challenged_action_claim:
+                challenged_action_claim = True
+                meta["challenged_action_claim"] = True
+                messages.append({"role": "assistant", "content": resp.content})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You claimed a proposal was queued, but no propose_action tool call "
+                            "or stored artifact exists. Do not narrate an action. Either call "
+                            "propose_action now using the exact TOOL/ARGS protocol, or say plainly "
+                            "that no proposal was created."
+                        ),
+                    }
+                )
+                continue
+            if unbacked_action:
+                meta["blocked_action_claim"] = True
+                meta["ms"] = int((time.monotonic() - started) * 1000)
+                return (
+                    "I didn't create a proposal. Nothing was queued or changed.",
+                    meta,
+                )
             invented = sorted(_ticket_ids(reply) - allowed)
             if invented and not challenged:
                 # One challenge, with the means to answer it. Asking is not a

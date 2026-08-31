@@ -285,6 +285,55 @@ def test_propose_action_drafts_and_never_executes():
     assert "Say yes" in reply
 
 
+def test_prose_cannot_claim_a_proposal_without_a_stored_artifact():
+    with patch(
+        "brutus.brain._create",
+        side_effect=[
+            _text_resp("Queued create_linear_ticket. Say yes to do it."),
+            _text_resp("The proposal is queued. Say yes to do it."),
+        ],
+    ):
+        reply, meta = brain_reply(
+            _cfg(),
+            _registry(),
+            history=_history(("user", "draft the ticket")),
+            on_propose=lambda _tool, _args: {"artifact_id": "never"},
+        )
+    assert reply == "I didn't create a proposal. Nothing was queued or changed."
+    assert meta["blocked_action_claim"] is True
+    assert "propose_action" not in meta["tools"]
+
+
+def test_unbacked_proposal_claim_gets_one_chance_to_call_the_real_tool():
+    drafted = []
+
+    def on_propose(tool, args):
+        drafted.append((tool, args))
+        return {"artifact_id": "real", "summary": "Create ticket", "spoken": "Create it?"}
+
+    with patch(
+        "brutus.brain._create",
+        side_effect=[
+            _text_resp("Queued the ticket. Say yes to do it."),
+            _tool_resp(
+                "propose_action",
+                {"tool": "create_linear_ticket", "args": {
+                    "title": "T", "outcome": "O", "target": "X", "premise": "P",
+                    "scope": "S", "preservation": "Keep", "acceptance": ["A"],
+                    "delivery": "D",
+                }},
+            ),
+            _text_resp("The real proposal is ready. Say yes to do it."),
+        ],
+    ):
+        reply, meta = brain_reply(
+            _cfg(), _registry(), history=_history(("user", "draft it")), on_propose=on_propose
+        )
+    assert "Say yes" in reply
+    assert meta["tools"] == ["propose_action"]
+    assert drafted[0][0] == "create_linear_ticket"
+
+
 def test_propose_action_refuses_non_gated_tools():
     responses = iter(
         [
