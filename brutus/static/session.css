@@ -1582,9 +1582,11 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; }
 /* Opening Workspace tools is a route change in the layout, not a popover.
    The prior fixed viewport kept its board clipped inside a short third grid
    row, which made a disclosure technically open but practically unreadable. */
-body:has(.work-tray[open]) { overflow-y: auto; }
+body:has(.work-tray[open]),
+body.workspace-open { overflow-y: auto; }
 
-.voice-shell:has(.work-tray[open]) {
+.voice-shell:has(.work-tray[open]),
+.voice-shell.workspace-open {
   height: auto;
   min-height: 100vh;
   grid-template-rows: auto minmax(34rem, auto) auto;

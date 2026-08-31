@@ -25,6 +25,20 @@ def test_voice_instructions_live_in_help_and_supervisor_names_providers():
     assert "Most recent:" in SOURCE
 
 
+def test_workspace_disclosure_releases_the_fixed_conversation_layout():
+    assert '$("#work-tray")?.addEventListener("toggle"' in SOURCE
+    assert 'classList.toggle("workspace-open", open)' in SOURCE
+    css = (Path(__file__).parents[1] / "brutus/static/session.css").read_text()
+    assert "body.workspace-open" in css
+    assert ".voice-shell.workspace-open" in css
+
+
+def test_supervisor_hides_generic_lifecycle_lectures():
+    assert "const genericAction" in SOURCE
+    assert "No verified next step yet." in SOURCE
+    assert "Status from" in SOURCE
+
+
 def test_livekit_is_the_preferred_transport_and_attaches_agent_audio():
     token = SOURCE.index("/voice-token")
     fallback = SOURCE.index("startLegacyVoice", token)

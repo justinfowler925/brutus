@@ -939,22 +939,33 @@ function renderSupervisor(payload) {
     .map(([provider, total]) => `${total} ${provider}`)
     .join(" · ");
   const newest = sessions[0] || null;
+  const watched = assessment?.session || null;
+  const watchedProvider = watched?.surface || watched?.provider || "agent";
+  const watchedTitle = watched?.title || "Unnamed session";
+  const watchedState = String(watched?.state || assessment?.intervention_type || "unknown").replaceAll("_", " ");
+  const genericAction = /^(?:inspect the failing evidence|review the pending action|answer the blocking question|resume the session|let the session continue|complete or assign)/i;
   const liveCount = String(counts.live ?? sessions.filter((s) => s.live).length ?? "");
   if (count) count.textContent = liveCount;
   if (detailCount) detailCount.textContent = liveCount;
   if (stateEl) {
     stateEl.textContent = assessment?.should_intervene
-      ? `${assessment.session?.surface || assessment.session?.provider || "agent"} · ${assessment.session?.title || "a session needs you"}`
+      ? `${watchedProvider} · ${watchedTitle} · ${watchedState}`
       : (providerCounts || "No agent sessions found");
   }
   if (nextEl) {
+    const action = String(assessment?.recommended_next_action || "").trim();
+    const verified = Array.isArray(assessment?.verified_progress) ? assessment.verified_progress.filter(Boolean) : [];
     nextEl.textContent = assessment?.should_intervene
-      ? assessment.recommended_next_action || ""
+      ? (genericAction.test(action) ? (verified[0] || "No verified next step yet.") : action)
       : (newest ? `Most recent: ${newest.title || "Untitled session"} · ${String(newest.state || "unknown").replaceAll("_", " ")}` : "");
   }
   if (evidenceEl) {
     const evidence = Array.isArray(assessment?.evidence) ? assessment.evidence : [];
-    evidenceEl.textContent = evidence.length ? `Evidence: ${evidence.slice(0, 2).join(" · ")}` : "";
+    const source = watched?.status_source || "";
+    const age = watched?.age || "";
+    evidenceEl.textContent = assessment?.should_intervene
+      ? [source && `Status from ${source.replaceAll("_", " ")}`, age].filter(Boolean).join(" · ")
+      : "";
   }
   if (!host) return;
   host.textContent = "";
@@ -1030,6 +1041,11 @@ function init() {
   });
 
   $("#supervisor-refresh")?.addEventListener("click", () => loadSupervisor({ force: true }));
+  $("#work-tray")?.addEventListener("toggle", (event) => {
+    const open = Boolean(event.currentTarget.open);
+    document.body.classList.toggle("workspace-open", open);
+    document.querySelector(".voice-shell")?.classList.toggle("workspace-open", open);
+  });
 
   $("#composer").addEventListener("submit", (e) => {
     e.preventDefault();
