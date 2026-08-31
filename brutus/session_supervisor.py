@@ -180,7 +180,11 @@ def assess_session(
     # provider-specific exception classes. Assessment must remain available.
     except Exception:  # noqa: BLE001
         return fallback
-    return _enforce_policy(candidate, fallback, signal)
+    return _enforce_policy(
+        replace(candidate, judgment_source="model", judgment_profile="supervisor"),
+        fallback,
+        signal,
+    )
 
 
 def build_judgment_prompt(

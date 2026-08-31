@@ -143,9 +143,10 @@ def test_force_refresh_does_not_rejudge_unchanged_session(tmp_path: Path):
         scanner=lambda **_: [_row(transcript, state="approval_needed")],
         judge=judge,
     )
-    runtime.observe()
+    first = runtime.observe()
     runtime.observe(force=True)
     assert calls == 1
+    assert first["assessment"]["judgment_source"] == "deterministic"
 
 
 def test_runtime_reassesses_when_unchanged_work_crosses_stale_threshold(tmp_path: Path):

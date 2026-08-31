@@ -179,27 +179,17 @@ class SupervisorRuntime:
                         stale_after_seconds=self.stale_after_seconds,
                     )
                     if self.judge is not None and assessment.should_intervene and judgment_budget:
-                        model_succeeded = False
-
-                        def tracked_judge(prompt: str) -> dict[str, Any] | str:
-                            nonlocal model_succeeded
-                            result = self.judge(prompt)
-                            model_succeeded = True
-                            return result
-
                         assessment = assess_session(
                             session_record,
                             str(delta.get("excerpt") or ""),
                             evidence,
-                            judge=tracked_judge,
+                            judge=self.judge,
                             stale_after_seconds=self.stale_after_seconds,
                         )
                         judgment_budget -= 1
-                        if model_succeeded:
+                        if assessment.judgment_source == "model":
                             assessment = replace(
                                 assessment,
-                                judgment_source="model",
-                                judgment_profile="supervisor",
                                 judgment_provider="claude",
                             )
                     self._save(
