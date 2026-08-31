@@ -23,3 +23,10 @@ def test_livekit_checks_owner_audio_before_forwarding_any_turn():
     handler = source[source.index("async def on_user_turn_completed"):source.index("async def llm_node")]
     assert "await self.gate.accepts_current_speaker()" in handler
     assert "raise StopResponse()" in handler
+
+
+def test_remote_track_callback_never_uses_a_nonexistent_is_local_flag():
+    source = (Path(__file__).parents[1] / "brutus/livekit_agent.py").read_text()
+    callback = source[source.index("def _on_track"):source.index("@session.on", source.index("def _on_track"))]
+    assert "participant.is_local" not in callback
+    assert "gate.observe(track)" in callback

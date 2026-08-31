@@ -168,8 +168,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     @ctx.room.on("track_subscribed")
-    def _on_track(track, _publication, participant) -> None:
-        if participant.is_local or track.kind != rtc.TrackKind.KIND_AUDIO:
+    def _on_track(track, _publication, _participant) -> None:
+        # `track_subscribed` only reports remote tracks. RemoteParticipant has
+        # no `is_local` property; checking it threw before audio reached the
+        # gate and made every owner turn fail closed.
+        if track.kind != rtc.TrackKind.KIND_AUDIO:
             return
         asyncio.create_task(gate.observe(track))
 
