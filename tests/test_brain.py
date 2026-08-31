@@ -334,6 +334,30 @@ def test_unbacked_proposal_claim_gets_one_chance_to_call_the_real_tool():
     assert drafted[0][0] == "create_linear_ticket"
 
 
+def test_voice_does_not_spend_a_second_model_call_correcting_an_action_claim():
+    with patch("brutus.brain._create", return_value=_text_resp("Queued it. Say yes to do it.")) as create:
+        reply, meta = brain_reply(
+            _cfg(),
+            _registry(),
+            history=_history(("user", "draft it")),
+            channel="voice",
+            on_propose=lambda _tool, _args: {"artifact_id": "never"},
+        )
+    assert reply == "I didn't create a proposal. Nothing was queued or changed."
+    assert meta["blocked_action_claim"] is True
+    create.assert_called_once()
+
+
+def test_cursor_tool_protocol_accepts_one_markdown_fence():
+    from brutus.brain import _parse_cursor_tool_call
+
+    assert _parse_cursor_tool_call('```json\nTOOL: list_notes\nARGS: {"q": "x"}\n```') == (
+        "list_notes",
+        {"q": "x"},
+    )
+    assert _parse_cursor_tool_call('I checked.\nTOOL: list_notes\nARGS: {"q": "x"}') is None
+
+
 def test_propose_action_refuses_non_gated_tools():
     responses = iter(
         [

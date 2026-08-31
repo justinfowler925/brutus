@@ -265,7 +265,10 @@ def _create(cfg: BrutusCfg, **kwargs: Any) -> Any:
         turns.append(f"{role.upper()}: {rendered}")
     prompt = (
         f"{system_text}\n\nAVAILABLE TOOLS\n{catalog}\n\n"
-        "Use a tool only when the answer needs it. To call one, reply with exactly "
+        "Use a tool whenever current work evidence or an action is required. Never say "
+        "you checked, compiled, queued, drafted, or proposed something without the matching "
+        "tool result. Requests to draft or queue an action require propose_action; requests "
+        "to decide new versus existing work require compile_unfog_work first. To call one, reply with exactly "
         "two lines and nothing else:\nTOOL: <tool_name>\nARGS: <json object>\n"
         "Otherwise answer Justin directly in plain prose.\n\nCONVERSATION\n"
         + "\n\n".join(turns)
@@ -275,20 +278,33 @@ def _create(cfg: BrutusCfg, **kwargs: Any) -> Any:
     if not result.get("ok"):
         raise BrainError(str(result.get("error") or "Cursor unavailable"), tried=["cursor"])
     text = str(result.get("reply") or "").strip()
-    match = re.fullmatch(r"TOOL:\s*([a-zA-Z0-9_]+)\s*\nARGS:\s*(\{.*\})\s*", text, re.DOTALL)
-    if match:
-        try:
-            args = json.loads(match.group(2))
-        except ValueError:
-            args = {}
-        if not isinstance(args, dict):
-            args = {}
-        content = [SimpleNamespace(type="tool_use", name=match.group(1), input=args, id="cursor_tool")]
+    parsed = _parse_cursor_tool_call(text)
+    if parsed:
+        name, args = parsed
+        content = [SimpleNamespace(type="tool_use", name=name, input=args, id="cursor_tool")]
         stop_reason = "tool_use"
     else:
         content = [SimpleNamespace(type="text", text=text)]
         stop_reason = "end_turn"
     return SimpleNamespace(content=content, stop_reason=stop_reason, usage=None)
+
+
+def _parse_cursor_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
+    """Accept the exact protocol with optional Markdown fence, never surrounding prose."""
+    value = (text or "").strip()
+    if value.startswith("```") and value.endswith("```"):
+        value = re.sub(r"^```(?:json|text)?\s*", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"\s*```$", "", value).strip()
+    match = re.fullmatch(
+        r"TOOL:\s*([a-zA-Z0-9_]+)\s*\nARGS:\s*(\{.*\})\s*", value, re.DOTALL
+    )
+    if not match:
+        return None
+    try:
+        args = json.loads(match.group(2))
+    except ValueError:
+        return None
+    return (match.group(1), args) if isinstance(args, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -537,6 +553,13 @@ def brain_reply(
                 "propose_action" not in meta["tools"]
                 and bool(_UNBACKED_ACTION_CLAIM.search(reply))
             )
+            if unbacked_action and channel == "voice":
+                meta["blocked_action_claim"] = True
+                meta["ms"] = int((time.monotonic() - started) * 1000)
+                return (
+                    "I didn't create a proposal. Nothing was queued or changed.",
+                    meta,
+                )
             if unbacked_action and not challenged_action_claim:
                 challenged_action_claim = True
                 meta["challenged_action_claim"] = True
