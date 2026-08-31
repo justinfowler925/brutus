@@ -235,7 +235,11 @@ class ConversationManager:
         if not intake.ready:
             return self._land(session_id, "fast", intake_question(intake), turn_id)
 
-        compiled = self._registry().call("compile_unfog_work", intake.args())
+        args = intake.args()
+        # ``title`` belongs to the eventual Linear mutation; the pure compiler
+        # receives ``draft_title`` instead, which it uses for its live lookup.
+        compiler_args = {key: value for key, value in args.items() if key != "title"}
+        compiled = self._registry().call("compile_unfog_work", compiler_args)
         result = compiled.get("result") if compiled.get("ok") else None
         if not isinstance(result, dict) or not result.get("ok"):
             detail = (result or compiled).get("error") if isinstance(result or compiled, dict) else "unknown error"
@@ -252,7 +256,6 @@ class ConversationManager:
         if action != "draft_new_ticket":
             return self._land(session_id, "fast", str(decision.get("reason") or "That ticket needs one material decision first."), turn_id, tool="compile_unfog_work")
 
-        args = intake.args()
         proposal_args = {key: value for key, value in args.items() if key not in {"draft_title"}}
         try:
             draft = self._on_propose(session_id, channel)("create_linear_ticket", proposal_args)

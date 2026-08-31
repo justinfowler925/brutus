@@ -289,6 +289,8 @@ def test_complete_labelled_ticket_intake_compiles_then_drafts_without_cursor(mgr
         result = mgr.handle(sid, message, wait=True)
     brain.assert_not_called()
     registry.call.assert_called_once_with("compile_unfog_work", ANY)
+    assert "title" not in registry.call.call_args.args[1]
+    assert registry.call.call_args.args[1]["draft_title"] == "Voice intake"
     artifact = mgr.store.artifacts(sid)[-1]
     assert artifact["tool"] == "create_linear_ticket"
     assert artifact["state"] == "draft"
