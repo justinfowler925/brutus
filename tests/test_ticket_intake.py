@@ -34,7 +34,7 @@ def test_natural_voice_intake_collects_one_material_field_at_a_time():
 
     second = compile_ticket_intake(_history(
         ("user", "draft a ticket to make voice action intake reliable"),
-        ("brutus", "For that ticket draft, what is the target?"),
+        ("assistant", "For that ticket draft, what is the target?"),
         ("user", "the Brutus voice work surface"),
     ))
     assert second.fields["target"] == "the Brutus voice work surface"
@@ -42,9 +42,9 @@ def test_natural_voice_intake_collects_one_material_field_at_a_time():
 
     complete = compile_ticket_intake(_history(
         ("user", "draft a ticket to make voice action intake reliable"),
-        ("brutus", "For that ticket draft, what is the target?"),
+        ("assistant", "For that ticket draft, what is the target?"),
         ("user", "the Brutus voice work surface"),
-        ("brutus", "For that ticket draft, what proves acceptance?"),
+        ("assistant", "For that ticket draft, what proves acceptance?"),
         ("user", "a draft is visible and no mutation happens before yes"),
     ))
     assert complete.ready

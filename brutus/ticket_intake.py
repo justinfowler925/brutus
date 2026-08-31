@@ -108,7 +108,7 @@ def compile_ticket_intake(history: list[dict[str, Any]]) -> TicketIntake:
         return TicketIntake(False, {})
     latest = users[-1]
     previous_assistant = next(
-        (str(item.get("content") or "") for item in reversed(history[:-1]) if item.get("role") == "brutus"),
+        (str(item.get("content") or "") for item in reversed(history[:-1]) if item.get("role") in {"brutus", "assistant"}),
         "",
     )
     expected = _QUESTION.match(previous_assistant.strip())
@@ -138,7 +138,7 @@ def compile_ticket_intake(history: list[dict[str, Any]]) -> TicketIntake:
         if item.get("role") != "user":
             continue
         prior = history[index - 1]
-        if prior.get("role") != "brutus":
+        if prior.get("role") not in {"brutus", "assistant"}:
             continue
         asked = _QUESTION.match(str(prior.get("content") or "").strip())
         if asked and not _FIELD.search(str(item.get("content") or "")):
