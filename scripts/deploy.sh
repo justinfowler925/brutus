@@ -322,18 +322,29 @@ fi
 
 # The LiveKit worker imports Brutus code but is a sibling launchd process. A
 # core-only restart leaves it executing yesterday's voice gate even though the
-# web app reports the new SHA. Restart it after every deploy when installed.
+# web app reports the new SHA. `kickstart -k` is not safe here: LiveKit owns a
+# child process that may retain its HTTP port while launchd starts its
+# replacement, producing a Python restart storm. Boot out, prove the port is
+# free, then bootstrap exactly one replacement.
 VOICE_AGENT_LABEL="com.clearspeed.brutus-livekit-agent"
 if [ -f "$HOME/Library/LaunchAgents/$VOICE_AGENT_LABEL.plist" ]; then
   if launchctl print "gui/$(id -u)/$VOICE_AGENT_LABEL" >/dev/null 2>&1; then
-    if launchctl kickstart -k "gui/$(id -u)/$VOICE_AGENT_LABEL"; then
-      echo "    $VOICE_AGENT_LABEL: restarted for deployed voice code"
-    else
-      echo "    $VOICE_AGENT_LABEL: FAILED TO RESTART"
-      FAIL=1
+    launchctl bootout "gui/$(id -u)/$VOICE_AGENT_LABEL" 2>/dev/null || true
+  fi
+  VOICE_PORT_FREE=0
+  for _ in $(seq 1 15); do
+    if ! lsof -nP -iTCP:8096 -sTCP:LISTEN >/dev/null 2>&1; then
+      VOICE_PORT_FREE=1; break
     fi
+    sleep 1
+  done
+  if [ "$VOICE_PORT_FREE" -ne 1 ]; then
+    echo "    $VOICE_AGENT_LABEL: NOT restarted — its health port is still busy"
+    FAIL=1
+  elif launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$VOICE_AGENT_LABEL.plist"; then
+    echo "    $VOICE_AGENT_LABEL: cleanly restarted for deployed voice code"
   else
-    echo "    $VOICE_AGENT_LABEL: installed but NOT LOADED"
+    echo "    $VOICE_AGENT_LABEL: FAILED TO RESTART"
     FAIL=1
   fi
 fi
