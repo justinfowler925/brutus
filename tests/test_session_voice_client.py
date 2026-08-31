@@ -5,6 +5,7 @@ stay green when the page never wires the helper.
 """
 
 from pathlib import Path
+import subprocess
 
 
 SOURCE = (Path(__file__).parents[1] / "brutus/static/session.js").read_text()
@@ -40,6 +41,12 @@ def test_owner_voice_enrollment_is_a_visible_record_and_consent_flow():
     assert 'id="enrollment-consent"' in html
     assert 'fetch("/api/voice-enrollment", { method: "POST", body })' in SOURCE
     assert "encodeWav" in SOURCE
+
+
+def test_shipped_session_client_is_valid_javascript():
+    source_path = Path(__file__).parents[1] / "brutus/static/session.js"
+    result = subprocess.run(["node", "--check", str(source_path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_workspace_disclosure_releases_the_fixed_conversation_layout():

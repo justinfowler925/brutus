@@ -158,7 +158,8 @@ async function submitEnrollment() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || `server said ${response.status}`);
     $("#enrollment-state").textContent = "Voice enrolled. Brutus will require this local owner profile for live voice.";
-    $("#voice-enroll .label")?.textContent = "Voice enrolled";
+    const enrollmentLabel = $("#voice-enroll .label");
+    if (enrollmentLabel) enrollmentLabel.textContent = "Voice enrolled";
   } catch (err) {
     $("#enrollment-state").textContent = `Enrollment did not finish — ${err.message}`;
     renderEnrollment();
