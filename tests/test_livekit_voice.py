@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from brutus.config import BrutusCfg, VoiceCfg
-from brutus.livekit_agent import BrutusVoiceAgent, session_id_from_room
+from brutus.livekit_agent import BrutusVoiceAgent, OwnerVoiceGate, session_id_from_room
 from brutus.server import create_app
 
 
@@ -31,7 +31,8 @@ def test_voice_token_is_disabled_without_complete_local_config():
         sid = client.post("/api/session/open", json={"title": "voice eval"}).json()["session_id"]
         out = client.post(f"/api/session/{sid}/voice-token")
     assert out.status_code == 200
-    assert out.json() == {"enabled": False}
+    assert out.json()["enabled"] is False
+    assert out.json()["owner_enrollment_required"] is True
 
 
 def test_voice_token_is_room_scoped_and_short_lived():
@@ -46,7 +47,10 @@ def test_voice_token_is_room_scoped_and_short_lived():
     )
     with patch("brutus.server.AtlasClient") as atlas:
         atlas.return_value = MagicMock()
-        client = TestClient(create_app(cfg, start_watchdog=False))
+        app = create_app(cfg, start_watchdog=False)
+        app.state.voice_identity = MagicMock()
+        app.state.voice_identity.status.return_value = {"enrolled": True}
+        client = TestClient(app)
         sid = client.post("/api/session/open", json={"title": "voice eval"}).json()["session_id"]
         payload = client.post(f"/api/session/{sid}/voice-token").json()
     assert payload["enabled"] is True
@@ -70,7 +74,7 @@ def test_livekit_agent_calls_canonical_session_endpoint():
     client.__aenter__.return_value = client
 
     with patch("brutus.livekit_agent.httpx.AsyncClient", return_value=client):
-        reply = asyncio.run(BrutusVoiceAgent("123456abcdef").llm_node(chat_ctx, [], MagicMock()))
+        reply = asyncio.run(BrutusVoiceAgent("123456abcdef", OwnerVoiceGate()).llm_node(chat_ctx, [], MagicMock()))
 
     assert reply == "Two decisions need you."
     client.post.assert_awaited_once_with(
