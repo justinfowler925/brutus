@@ -1551,6 +1551,30 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; }
 .work-tray > h2 { display: none; }
 .work-tray .queue-board { min-height: 24rem; }
 
+/* Opening Workspace tools is a route change in the layout, not a popover.
+   The prior fixed viewport kept its board clipped inside a short third grid
+   row, which made a disclosure technically open but practically unreadable. */
+body:has(.work-tray[open]) { overflow-y: auto; }
+
+.voice-shell:has(.work-tray[open]) {
+  height: auto;
+  min-height: 100vh;
+  grid-template-rows: auto minmax(34rem, auto) auto;
+}
+
+.work-tray[open] {
+  max-height: none;
+  overflow: visible;
+  background: var(--shine-color-bg-subtle);
+  border-color: var(--shine-color-border);
+}
+
+.work-tray[open] .queue-board {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
 .conversation-empty {
   min-height: 100%;
   display: grid;

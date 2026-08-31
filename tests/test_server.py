@@ -340,6 +340,8 @@ def test_session_ideas_build_plan_markers():
         css = TestClient(app).get("/static/session.css").text
         assert ".topbar .title a" in css
         assert "text-decoration: underline" in css
+        assert ".voice-shell:has(.work-tray[open])" in css
+        assert ".work-tray[open] .queue-board" in css
         js = TestClient(app).get("/static/session.js").text
         assert "initIdeas" in js
         assert "ideaDelete" in js
