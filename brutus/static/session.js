@@ -747,7 +747,12 @@ async function startVoice() {
     });
     if (!response.ok) throw new Error(`voice service said ${response.status}`);
     const grant = await response.json();
-    if (!grant.enabled || !grant.url || !grant.token) return startLegacyVoice();
+    if (!grant.enabled || !grant.url || !grant.token) {
+      if (grant.owner_enrollment_required) {
+        return setVoicePhase("error", grant.reason || "Enroll your voice before starting live voice.");
+      }
+      return startLegacyVoice();
+    }
     const livekit = await import(LIVEKIT_CLIENT_URL);
     // Suppress the easy part of speaker bleed before it leaves the browser:
     // echo from Brutus's own TTS, steady background noise, and aggressive gain
@@ -801,6 +806,10 @@ async function startVoice() {
     if (err.name === "AbortError") return;
     await teardownLiveKit();
     state.voiceTransport = null;
+    // Once owner-only voice is enabled, browser recognition is an unauthenticated
+    // bypass. It must fail closed instead of quietly changing transports.
+    const enrolled = await fetch("/api/voice-enrollment").then((r) => r.ok ? r.json() : {}).catch(() => ({}));
+    if (enrolled.enrolled) return setVoicePhase("error", "Owner voice is unavailable. Try live voice again; browser fallback is disabled for safety.");
     startLegacyVoice("Live voice unavailable — using this browser’s microphone.");
   } finally {
     if (state.voiceStartAbort === controller) state.voiceStartAbort = null;

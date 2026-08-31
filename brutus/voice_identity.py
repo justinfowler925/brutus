@@ -8,6 +8,7 @@ ECAPA-TDNN model is a speaker-recognition model, not a transcription heuristic.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import tempfile
@@ -73,6 +74,16 @@ class VoiceIdentity:
         observed = self._embedding(wav_sample)
         score = float(np.dot(enrolled, observed))
         return {"accepted": score >= MATCH_THRESHOLD, "score": round(score, 4)}
+
+    def verify_pcm(self, pcm: bytes, sample_rate: int) -> dict[str, Any]:
+        """Verify int16 mono PCM arriving directly from the LiveKit audio stream."""
+        with io.BytesIO() as out:
+            with wave.open(out, "wb") as writer:
+                writer.setnchannels(1)
+                writer.setsampwidth(2)
+                writer.setframerate(sample_rate)
+                writer.writeframes(pcm)
+            return self.verify(out.getvalue())
 
     def _load(self) -> dict[str, Any] | None:
         try:

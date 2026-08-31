@@ -320,6 +320,24 @@ if ! wait_for_new_actor "$PRE_RESTART_PID"; then
   FAIL=1
 fi
 
+# The LiveKit worker imports Brutus code but is a sibling launchd process. A
+# core-only restart leaves it executing yesterday's voice gate even though the
+# web app reports the new SHA. Restart it after every deploy when installed.
+VOICE_AGENT_LABEL="com.clearspeed.brutus-livekit-agent"
+if [ -f "$HOME/Library/LaunchAgents/$VOICE_AGENT_LABEL.plist" ]; then
+  if launchctl print "gui/$(id -u)/$VOICE_AGENT_LABEL" >/dev/null 2>&1; then
+    if launchctl kickstart -k "gui/$(id -u)/$VOICE_AGENT_LABEL"; then
+      echo "    $VOICE_AGENT_LABEL: restarted for deployed voice code"
+    else
+      echo "    $VOICE_AGENT_LABEL: FAILED TO RESTART"
+      FAIL=1
+    fi
+  else
+    echo "    $VOICE_AGENT_LABEL: installed but NOT LOADED"
+    FAIL=1
+  fi
+fi
+
 echo "==> verifying the layer you actually use"
 wait_for_http_200 "http://127.0.0.1:$PORT/session" \
   && echo "    /session 200" || { echo "    /session unavailable"; FAIL=1; }

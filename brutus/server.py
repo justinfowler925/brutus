@@ -1467,6 +1467,13 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
         store: SessionStore = request.app.state.sessions
         if not store.get_session(session_id):
             raise HTTPException(status_code=404, detail="unknown session")
+        identity: VoiceIdentity = request.app.state.voice_identity
+        if not identity.status()["enrolled"]:
+            return {
+                "enabled": False,
+                "owner_enrollment_required": True,
+                "reason": "Enroll your voice before starting owner-only live voice.",
+            }
         voice_cfg = cfg.voice
         if not (
             voice_cfg

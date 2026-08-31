@@ -49,6 +49,13 @@ def test_voice_enrollment_status_is_available_without_exposing_a_profile(client)
     assert "embedding" not in r.json()
 
 
+def test_owner_live_voice_fails_closed_until_enrollment(client):
+    sid = client.post("/api/session/open", json={}).json()["session_id"]
+    response = client.post(f"/api/session/{sid}/voice-token")
+    assert response.status_code == 200
+    assert response.json()["owner_enrollment_required"] is True
+
+
 def test_say_records_both_sides(client):
     sid = client.post("/api/session/open", json={}).json()["session_id"]
     with patch("brutus.conversation.brain_reply", return_value=("Two need you.", {})):

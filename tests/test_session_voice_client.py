@@ -83,9 +83,18 @@ def test_livekit_capture_suppresses_echo_and_background_noise_before_stt():
 
 
 def test_disabled_or_failed_livekit_falls_back_to_browser_speech():
-    assert 'if (!grant.enabled || !grant.url || !grant.token) return startLegacyVoice()' in SOURCE
+    assert "if (!grant.enabled || !grant.url || !grant.token)" in SOURCE
+    assert "return startLegacyVoice();" in SOURCE
     assert 'startLegacyVoice("Live voice unavailable' in SOURCE
     assert "const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition" in SOURCE
+
+
+def test_owner_enrollment_never_falls_back_to_unverified_browser_voice():
+    start = SOURCE.index("async function startVoice()")
+    end = SOURCE.index("\nfunction startLegacyVoice", start)
+    body = SOURCE[start:end]
+    assert "grant.owner_enrollment_required" in body
+    assert "browser fallback is disabled for safety" in body
 
 
 def test_route_teardown_aborts_every_request_and_disconnects_room():
