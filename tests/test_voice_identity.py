@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from brutus.voice_identity import VoiceIdentity
+from brutus.voice_identity import MATCH_THRESHOLD, VoiceIdentity
 
 
 def test_owner_profile_stores_embedding_not_raw_recordings(tmp_path: Path):
@@ -13,6 +13,10 @@ def test_owner_profile_stores_embedding_not_raw_recordings(tmp_path: Path):
     saved = (tmp_path / "voice-owner.json").read_text()
     assert "one" not in saved and "two" not in saved and "three" not in saved
     assert identity.verify(b"again")["accepted"] is True
+
+
+def test_cross_transport_owner_threshold_is_explicit_and_nontrivial():
+    assert 0.4 <= MATCH_THRESHOLD < 0.6
 
 
 def test_decode_rejects_non_wav_input(tmp_path: Path):

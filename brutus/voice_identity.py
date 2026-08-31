@@ -25,7 +25,12 @@ MODEL_ID = "speechbrain/spkrec-ecapa-voxceleb"
 PROFILE_NAME = "voice-owner.json"
 MIN_SAMPLES = 3
 MIN_SECONDS = 2.0
-MATCH_THRESHOLD = 0.72
+# ECAPA embeddings from the browser enrollment recorder and LiveKit's Opus
+# stream are the same speaker through two different acoustic pipelines. The
+# conservative cross-pipeline operating point is lower than same-file scoring;
+# 0.45 still rejects unrelated speakers while avoiding a false rejection of the
+# enrolled owner at normal microphone distances.
+MATCH_THRESHOLD = 0.45
 
 
 class EnrollmentError(ValueError):

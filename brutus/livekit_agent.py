@@ -50,6 +50,7 @@ class OwnerVoiceGate:
             return False
         pcm = b"".join(self._frames)
         verdict = await asyncio.to_thread(self.identity.verify_pcm, pcm, self.sample_rate)
+        log.info("owner voice score=%.4f accepted=%s", float(verdict.get("score") or 0), verdict.get("accepted"))
         return bool(verdict.get("accepted"))
 
 
