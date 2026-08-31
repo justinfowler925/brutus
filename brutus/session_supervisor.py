@@ -320,7 +320,11 @@ def _fallback_assessment(
 
 def _parse_model_assessment(raw: Mapping[str, Any] | str) -> SessionAssessment:
     if isinstance(raw, str):
-        obj = json.loads(raw)
+        value = raw.strip()
+        if value.startswith("```") and value.endswith("```"):
+            value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
+            value = re.sub(r"\s*```$", "", value).strip()
+        obj = json.loads(value)
     elif isinstance(raw, Mapping):
         obj = dict(raw)
     else:

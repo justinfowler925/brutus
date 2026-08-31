@@ -236,6 +236,20 @@ def test_model_cannot_suppress_required_intervention():
     )
 
     assert result.intervention_type == "failed"
+
+
+def test_strict_model_contract_accepts_one_json_markdown_fence():
+    payload = model_result(
+        intervention_type="failed",
+        should_intervene=True,
+        ticket_disposition="continue",
+    )
+    result = assess_session(
+        session(status="failed"),
+        judge=lambda _: f"```json\n{json.dumps(payload)}\n```",
+    )
+    assert result.judgment_source == "model"
+    assert result.intervention_type == "failed"
     assert result.should_intervene is True
     assert result.ticket_disposition == "continue"
 
