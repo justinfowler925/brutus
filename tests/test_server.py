@@ -316,10 +316,9 @@ def test_session_ideas_build_plan_markers():
         cls.return_value = MagicMock()
         app = create_app(cfg, start_watchdog=False)
         html = TestClient(app).get("/session").text
-        # The queue region's aria-label is load-bearing beyond accessibility:
-        # scripts/screen-census.mjs resolves regions by it to check that the work
-        # holds the most area. Rename it and that gate stops finding the region.
-        assert 'aria-label="Queue"' in html
+        # The voice surface is primary. Queue controls remain available under a
+        # deliberate workspace-tools disclosure, never as a competing board.
+        assert 'aria-label="Workspace tools"' in html
         # There is no separate Ledger region any more. Ledger rows and personal
         # captures sit in the same staged queue, told apart by a source badge —
         # two boards for one pipeline was the thing that made neither readable.
@@ -360,7 +359,8 @@ def test_session_ideas_wave2_markers():
         assert 'id="ideas-search"' in html
         assert 'data-filter="active"' in html
         assert "Active" in html
-        assert 'class="ops-link"' in html or 'href="/"' in html
+        assert 'class="ops-link"' not in html
+        assert 'href="/"' not in html
         assert 'class="ideas-filters"' in html
         assert 'id="ledger-detail"' in html
         assert 'id="ledger-detail-link"' in html

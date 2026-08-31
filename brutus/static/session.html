@@ -92,7 +92,10 @@
         <p class="supervisor-evidence" id="supervisor-evidence"></p>
         <button type="button" id="supervisor-refresh">Check now</button>
       </div>
-      <ol class="agent-strip" id="supervisor-agents" aria-label="Observed agent sessions"></ol>
+      <details class="agent-details">
+        <summary>Session detail <span class="count" id="supervisor-count-detail"></span></summary>
+        <ol class="agent-strip" id="supervisor-agents" aria-label="Observed agent sessions"></ol>
+      </details>
     </section>
 
     <aside id="ledger-detail" class="panel ledger-detail" aria-label="Thread detail" hidden>
@@ -122,10 +125,10 @@
     </details>
   </aside>
 
-  <details class="panel queue work-tray" data-testid="work-tray" aria-label="Queue">
+  <details class="panel queue work-tray" data-testid="work-tray" aria-label="Workspace tools">
     <summary class="work-tray-summary">
-      <span>Detailed work queue</span>
-      <span class="work-tray-hint">Supporting detail · open when needed</span>
+      <span>Workspace tools</span>
+      <span class="work-tray-hint">Capture or browse work when you need it</span>
       <span class="count" id="ideas-count"></span>
     </summary>
     <h2>
@@ -158,7 +161,6 @@
           <button type="button" data-filter="ledger" aria-pressed="false">Ledger</button>
           <button type="button" data-filter="all" aria-pressed="false">All</button>
         </div>
-        <a class="ops-link" href="/">Decisions →</a>
         <label class="show-done">
           <input type="checkbox" id="queue-show-done"> Done
         </label>

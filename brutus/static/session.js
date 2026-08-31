@@ -928,11 +928,14 @@ function renderSupervisor(payload) {
   const counts = payload.counts || {};
   const assessment = payload.assessment || payload.intervention || null;
   const count = $("#supervisor-count");
+  const detailCount = $("#supervisor-count-detail");
   const stateEl = $("#supervisor-state");
   const nextEl = $("#supervisor-next");
   const evidenceEl = $("#supervisor-evidence");
   const host = $("#supervisor-agents");
-  if (count) count.textContent = String(counts.live ?? sessions.filter((s) => s.live).length ?? "");
+  const liveCount = String(counts.live ?? sessions.filter((s) => s.live).length ?? "");
+  if (count) count.textContent = liveCount;
+  if (detailCount) detailCount.textContent = liveCount;
   if (stateEl) {
     stateEl.textContent = assessment?.should_intervene
       ? assessment.intervention_reason || "One session needs you"
