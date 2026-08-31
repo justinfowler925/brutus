@@ -302,7 +302,7 @@ def test_incomplete_explicit_ticket_contract_gets_one_focused_question_without_c
     with _brain() as brain:
         result = mgr.handle(sid, "draft a ticket: outcome: Make voice intake reliable", wait=True)
     brain.assert_not_called()
-    assert "target, premise, scope, preservation, acceptance, delivery" in result.reply
+    assert result.reply == "For that ticket draft, what is the target?"
     assert mgr.store.artifacts(sid) == []
 
 

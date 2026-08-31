@@ -7,6 +7,7 @@ from brutus.session_supervisor import (
     NormalizedSession,
     SessionAssessment,
     assess_session,
+    redact_supervisor_transcript,
 )
 
 
@@ -68,6 +69,18 @@ def test_running_session_repairing_failed_test_stays_silent():
         "assistant: The test command failed with exit 1; I am repairing it now.",
     )
     assert result.intervention_type == "none"
+
+
+def test_supervisor_redacts_credentials_and_email_before_model_transport():
+    safe = redact_supervisor_transcript(
+        "assistant: deploy failed; token=super-secret-value-123 and email=justin@example.com "
+        "Authorization: Bearer abcdefghijklmnop"
+    )
+
+    assert "super-secret-value-123" not in safe
+    assert "justin@example.com" not in safe
+    assert "abcdefghijklmnop" not in safe
+    assert "deploy failed" in safe
 
 
 def test_model_cannot_manufacture_interruption_for_ordinary_progress():

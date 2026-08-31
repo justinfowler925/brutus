@@ -19,7 +19,7 @@ from typing import Any
 
 from .agent_sessions import filter_cockpit, read_transcript_delta, scan_agent_sessions
 from .paths import state_path
-from .session_supervisor import SessionAssessment, assess_session
+from .session_supervisor import SessionAssessment, assess_session, redact_supervisor_transcript
 
 Judge = Callable[[str], dict[str, Any] | str]
 
@@ -172,16 +172,20 @@ class SupervisorRuntime:
                         f"lifecycle={state} source={row.get('status_source') or 'unknown'}",
                         f"observation={fingerprint[:12] or 'none'}",
                     ]
+                    # The byte cursor remains over the raw local transcript;
+                    # only the model-facing work judgment receives this
+                    # minimized excerpt.
+                    safe_delta = redact_supervisor_transcript(str(delta.get("excerpt") or ""))
                     assessment = assess_session(
                         session_record,
-                        str(delta.get("excerpt") or ""),
+                        safe_delta,
                         evidence,
                         stale_after_seconds=self.stale_after_seconds,
                     )
                     if self.judge is not None and assessment.should_intervene and judgment_budget:
                         assessment = assess_session(
                             session_record,
-                            str(delta.get("excerpt") or ""),
+                            safe_delta,
                             evidence,
                             judge=self.judge,
                             stale_after_seconds=self.stale_after_seconds,

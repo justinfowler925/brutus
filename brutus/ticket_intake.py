@@ -19,6 +19,10 @@ _REQUEST = re.compile(
     re.IGNORECASE,
 )
 _CONTINUE = re.compile(r"\b(?:draft|create|open|file)\s+(?:it|this|that|the ticket)\b", re.IGNORECASE)
+_QUESTION = re.compile(
+    r"^For that ticket draft, what (?:is|proves) (?:the )?(outcome|target|premise|scope|preservation|acceptance|delivery)\?",
+    re.IGNORECASE,
+)
 _FIELD = re.compile(
     r"(?:^|\n)\s*(title|outcome|target|premise|scope|preservation|acceptance|delivery)\s*:\s*",
     re.IGNORECASE,
@@ -57,6 +61,37 @@ class TicketIntake:
         }
 
 
+def _set_field(values: dict[str, str | tuple[str, ...]], key: str, value: str) -> None:
+    value = value.strip(" \t\r\n;.")
+    if not value:
+        return
+    if key == "acceptance":
+        items = tuple(part.strip(" -\t.") for part in re.split(r"(?:\n|;)+", value) if part.strip(" -\t."))
+        if items:
+            values[key] = items
+    else:
+        values[key] = value
+
+
+def _natural_outcome(message: str) -> str:
+    match = re.search(
+        r"\b(?:new|create|open|draft|file|make)\s+(?:a\s+)?(?:linear\s+)?ticket\s+(?:to|for|about)\s+(.+)$",
+        message,
+        re.IGNORECASE,
+    )
+    return match.group(1).strip(" \t\r\n;.") if match else ""
+
+
+def _apply_safe_defaults(values: dict[str, str | tuple[str, ...]]) -> None:
+    """Fill only stable delivery mechanics, never a product decision or success test."""
+    if not values.get("outcome"):
+        return
+    values.setdefault("premise", "Justin requested this work; the ticket must verify its premise during execution.")
+    values.setdefault("scope", "one approval-gated Linear ticket for the stated outcome")
+    values.setdefault("preservation", "existing issues, active sessions, and unrelated work")
+    values.setdefault("delivery", "compile, review, approve, then create exactly one Linear ticket")
+
+
 def compile_ticket_intake(history: list[dict[str, Any]]) -> TicketIntake:
     """Collect labelled fields from user turns when the newest turn requests a ticket.
 
@@ -65,14 +100,19 @@ def compile_ticket_intake(history: list[dict[str, Any]]) -> TicketIntake:
     historical fields are excluded because only turns after the most recent
     explicit ticket request are considered.
     """
-    users = [str(item.get("content") or "") for item in history if item.get("role") == "user"]
-    if not users:
+    if not history:
         return TicketIntake(False, {})
+    users = [str(item.get("content") or "") for item in history if item.get("role") == "user"]
     starts = [index for index, value in enumerate(users) if _REQUEST.search(value)]
     if not starts:
         return TicketIntake(False, {})
     latest = users[-1]
-    if not (_REQUEST.search(latest) or _FIELD.search(latest) or _CONTINUE.search(latest)):
+    previous_assistant = next(
+        (str(item.get("content") or "") for item in reversed(history[:-1]) if item.get("role") == "brutus"),
+        "",
+    )
+    expected = _QUESTION.match(previous_assistant.strip())
+    if not (_REQUEST.search(latest) or _FIELD.search(latest) or _CONTINUE.search(latest) or expected):
         return TicketIntake(False, {})
     start = starts[-1]
     values: dict[str, str | tuple[str, ...]] = {}
@@ -90,19 +130,30 @@ def compile_ticket_intake(history: list[dict[str, Any]]) -> TicketIntake:
         for index, match in enumerate(matches):
             key = match.group(1).casefold()
             end = matches[index + 1].start() if index + 1 < len(matches) else len(message)
-            value = message[match.end():end].strip(" \t\r\n;.")
-            if not value:
-                continue
-            if key == "acceptance":
-                items = tuple(part.strip(" -\t.") for part in re.split(r"(?:\n|;)+", value) if part.strip(" -\t."))
-                if items:
-                    values[key] = items
-            else:
-                values[key] = value
+            _set_field(values, key, message[match.end():end])
+    # Deterministic questions turn ordinary spoken replies into the requested
+    # field.  Only an immediately preceding Brutus question can authorize
+    # this association; arbitrary assistant prose never becomes ticket data.
+    for index, item in enumerate(history[1:], start=1):
+        if item.get("role") != "user":
+            continue
+        prior = history[index - 1]
+        if prior.get("role") != "brutus":
+            continue
+        asked = _QUESTION.match(str(prior.get("content") or "").strip())
+        if asked and not _FIELD.search(str(item.get("content") or "")):
+            _set_field(values, asked.group(1).casefold(), str(item.get("content") or ""))
+    if not values.get("outcome"):
+        _set_field(values, "outcome", _natural_outcome(users[start]))
+    if expected and not _FIELD.search(latest) and not _REQUEST.search(latest):
+        _set_field(values, expected.group(1).casefold(), latest)
+    _apply_safe_defaults(values)
     return TicketIntake(True, values)
 
 
 def intake_question(intake: TicketIntake) -> str:
-    """One focused, non-model question for only execution-changing omissions."""
-    labels = ", ".join(intake.missing)
-    return f"For that ticket draft, give me: {labels}. I’ll compile it, check for duplicate work, then queue the review."
+    """Ask exactly one unresolved decision question, suitable for speech."""
+    field = intake.missing[0]
+    if field == "acceptance":
+        return "For that ticket draft, what proves acceptance?"
+    return f"For that ticket draft, what is the {field}?"

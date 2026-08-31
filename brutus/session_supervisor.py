@@ -53,10 +53,31 @@ _FOLLOWUP_RE = re.compile(
     r"open (?:a |the )?(?:pr|ticket)|create (?:a |the )?ticket|ready for review)\b",
     re.IGNORECASE,
 )
+_SENSITIVE_PATTERNS = (
+    # Explicit credentials and auth headers. Keep the surrounding sentence so
+    # work-state signals such as "failed" and "approval" still survive.
+    (re.compile(r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{12,})\b"), "[redacted credential]"),
+    (re.compile(r"(?i)(\b(?:authorization|bearer)\s*[: ]\s*)([^\s,;]{8,})"), r"\1[redacted]"),
+    (re.compile(r"(?i)(\b(?:api[_ -]?key|token|secret|password|passwd)\s*[=:]\s*)([^\s,;]{6,})"), r"\1[redacted]"),
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[redacted email]"),
+)
 
 
 class AssessmentValidationError(ValueError):
     """A proposed assessment does not satisfy the strict output contract."""
+
+
+def redact_supervisor_transcript(value: str | Sequence[str]) -> str:
+    """Remove common secrets and personal email before a transcript reaches a model.
+
+    This is intentionally a narrow transport boundary, not a lossy transcript
+    sanitizer: local cursors still advance over the original bytes and the
+    deterministic lifecycle scanner remains authoritative.
+    """
+    text = _normalize_delta(value)
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 @dataclass(frozen=True)

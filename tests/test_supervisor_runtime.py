@@ -128,6 +128,34 @@ def test_runtime_uses_at_most_one_model_judgment_per_sweep(tmp_path: Path):
     assert out["sessions"][1]["assessment"]["judgment_source"] == "deterministic"
 
 
+def test_runtime_never_sends_raw_transcript_secrets_to_the_judge(tmp_path: Path):
+    transcript = tmp_path / "secret.jsonl"
+    _write(transcript, "assistant", "Approval requested. token=super-secret-value-123")
+    prompts: list[str] = []
+
+    def judge(prompt: str):
+        prompts.append(prompt)
+        return {
+            "goal": "Resolve approval",
+            "verified_progress": [],
+            "blocker_or_decision": "Approval is required.",
+            "recommended_next_action": "Approve or reject it.",
+            "evidence": ["lifecycle"],
+            "confidence": 0.9,
+            "intervention_type": "approval_needed",
+            "intervention_reason": "Approval is required.",
+            "ticket_disposition": "continue",
+            "should_intervene": True,
+        }
+
+    SupervisorRuntime(
+        tmp_path / "s.sqlite", scanner=lambda **_: [_row(transcript, state="approval_needed")], judge=judge
+    ).observe()
+    assert len(prompts) == 1
+    assert "super-secret-value-123" not in prompts[0]
+    assert "[redacted]" in prompts[0]
+
+
 def test_force_refresh_does_not_rejudge_unchanged_session(tmp_path: Path):
     transcript = tmp_path / "one.jsonl"
     _write(transcript, "assistant", "Approval requested.")
