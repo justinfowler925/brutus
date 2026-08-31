@@ -54,6 +54,14 @@ def test_livekit_is_the_preferred_transport_and_attaches_agent_audio():
     assert "https://esm.sh/livekit-client@2.15.13" in SOURCE
 
 
+def test_livekit_claims_spoken_output_before_connecting():
+    start = SOURCE.index("async function startVoice()")
+    end = SOURCE.index("\nfunction startLegacyVoice", start)
+    body = SOURCE[start:end]
+    assert body.index("state.voiceTransport = \"livekit\"") < body.index("await room.connect")
+    assert "!state.livekitRoom && state.voiceTransport !== \"livekit\"" in SOURCE
+
+
 def test_livekit_capture_suppresses_echo_and_background_noise_before_stt():
     assert "audioCaptureDefaults" in SOURCE
     assert "echoCancellation: true" in SOURCE

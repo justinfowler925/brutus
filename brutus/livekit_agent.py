@@ -12,6 +12,8 @@ from livekit.agents import Agent, AgentSession, StopResponse, llm
 from livekit.plugins import elevenlabs, silero
 from livekit.plugins.elevenlabs import VoiceSettings
 
+from .config import load_config
+
 log = logging.getLogger("brutus.livekit")
 BRUTUS_URL = os.environ.get("BRUTUS_URL", "http://127.0.0.1:8768")
 
@@ -77,7 +79,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect()
     session_id = session_id_from_room(ctx.room.name)
     api_key = os.environ["ELEVENLABS_API_KEY"]
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID") or "hpp4J3VqNfWAUOO0d1Us"
+    # The fallback browser player and LiveKit must use the same configured
+    # identity. An environment-only LiveKit value made one conversation start
+    # in one voice and continue in another after transport handoff.
+    configured_voice_id = load_config().voice.elevenlabs_voice_id.strip()
+    voice_id = configured_voice_id or os.environ.get("ELEVENLABS_VOICE_ID") or "hpp4J3VqNfWAUOO0d1Us"
     session = AgentSession(
         stt=elevenlabs.STT(
             api_key=api_key,

@@ -155,14 +155,14 @@ function handle(event) {
       renderTurn(event.turn);
       break;
     case "reply":
-      if (event.spoken && state.voiceTransport !== "livekit") speak(event.spoken);
+      if (event.spoken && !state.livekitRoom && state.voiceTransport !== "livekit") speak(event.spoken);
       break;
     case "answer":
       resolveThinking(event);
       // Speak the ANSWER, not only the acknowledgement. It used to arrive
       // silently by design, which meant conversational mode said "Ok." and then
       // nothing at all — the thing you actually asked for never reached the ear.
-      if (event.spoken && state.voiceTransport !== "livekit") speak(event.spoken);
+      if (event.spoken && !state.livekitRoom && state.voiceTransport !== "livekit") speak(event.spoken);
       break;
     case "thinking":
       renderThinking(event);
@@ -650,6 +650,9 @@ async function startVoice() {
       },
     });
     state.livekitRoom = room;
+    // Claim spoken output before connecting. A fast reply event during the
+    // handshake must not start browser TTS while LiveKit is about to speak.
+    state.voiceTransport = "livekit";
     state.livekitStopping = false;
     room.on(livekit.RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== livekit.Track.Kind.Audio && track.kind !== "audio") return;
@@ -683,12 +686,12 @@ async function startVoice() {
     });
     await room.connect(grant.url, grant.token);
     await room.localParticipant.setMicrophoneEnabled(true);
-    state.voiceTransport = "livekit";
     state.listening = true;
     setVoicePhase("listening");
   } catch (err) {
     if (err.name === "AbortError") return;
     await teardownLiveKit();
+    state.voiceTransport = null;
     startLegacyVoice("Live voice unavailable — using this browser’s microphone.");
   } finally {
     if (state.voiceStartAbort === controller) state.voiceStartAbort = null;
