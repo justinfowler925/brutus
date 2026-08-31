@@ -98,10 +98,28 @@ async function hydrate(sessionId) {
   restoreThinking(snap.turns || []);
   (snap.fields || []).forEach((f) => renderField(f, { animate: false }));
   (snap.artifacts || []).forEach(renderProposal);
+  if (!(snap.turns || []).length) renderConversationEmpty();
   renderCounts();
   // A rebuilt transcript starts at the newest turn, not scrolled to the top.
   scrollToEnd({ force: true });
   connect(sessionId);
+}
+
+function renderConversationEmpty() {
+  const empty = document.createElement("div");
+  empty.className = "conversation-empty";
+  empty.id = "conversation-empty";
+  const title = document.createElement("h2");
+  title.textContent = "Your voice is the work surface";
+  const body = document.createElement("p");
+  body.textContent = "Talk naturally. Brutus will judge the work and answer with one useful next move.";
+  const action = document.createElement("button");
+  action.type = "button";
+  action.dataset.startVoice = "";
+  action.textContent = "Start talking";
+  action.addEventListener("click", () => $("#mic").click());
+  empty.append(title, body, action);
+  $("#conversation").append(empty);
 }
 
 function connect(sessionId) {
@@ -270,7 +288,7 @@ function showToLatest(show) {
  * always worth its own height; the scrollback is only worth space once there is
  * something in it. */
 function setConversationFilled() {
-  const panel = document.querySelector(".rail-convo");
+  const panel = document.querySelector(".voice-stage");
   if (panel) panel.classList.toggle("is-empty", state.seenTurns.size === 0);
 }
 
@@ -833,37 +851,123 @@ function setVoicePhase(phase, detail = "") {
   btn.dataset.voiceState = phase;
   const glyph = btn.querySelector(".glyph");
   const label = btn.querySelector(".label");
+  const stateLabel = $("#voice-state-label");
+  const stateDetail = $("#voice-state-detail");
+  const presence = document.querySelector(".voice-presence-ring");
+  if (presence) presence.dataset.voiceState = phase;
   if (phase === "speaking") {
     glyph.textContent = "■";
     label.textContent = "Stop";
     btn.setAttribute("aria-label", "Stop reading");
     btn.setAttribute("aria-pressed", "true");
+    if (stateLabel) stateLabel.textContent = "Brutus is speaking";
+    if (stateDetail) stateDetail.textContent = "Interrupt whenever you need to redirect him.";
     setStatus("Speaking…");
   } else if (phase === "thinking" || phase === "buffering") {
     glyph.textContent = "■";
     label.textContent = "Stop";
     btn.setAttribute("aria-label", phase === "thinking" ? "Cancel reply and listen" : "Cancel spoken reply and listen");
     btn.setAttribute("aria-pressed", "true");
+    if (stateLabel) stateLabel.textContent = phase === "thinking" ? "Working the question" : "Joining the conversation";
+    if (stateDetail) stateDetail.textContent = detail || (phase === "thinking" ? "Checking current evidence before answering." : "Connecting the live voice session.");
     setStatus(detail || (phase === "thinking" ? "Thinking…" : "Preparing reply…"));
   } else if (phase === "listening") {
     glyph.textContent = "●";
     label.textContent = "Listening";
     btn.setAttribute("aria-label", "Stop listening");
     btn.setAttribute("aria-pressed", "true");
+    if (stateLabel) stateLabel.textContent = "Listening";
+    if (stateDetail) stateDetail.textContent = detail || "Talk naturally. Pause when you are done.";
     setStatus(detail || "Listening…");
   } else if (phase === "error") {
     glyph.textContent = "!";
-    label.textContent = "Talk";
+    label.textContent = "Retry voice";
     btn.setAttribute("aria-label", "Voice commands; last attempt failed");
     btn.setAttribute("aria-pressed", "false");
+    if (stateLabel) stateLabel.textContent = "Voice needs attention";
+    if (stateDetail) stateDetail.textContent = detail || "The connection failed. Your conversation is still here.";
     setStatus(detail || "Voice failed. Tap Talk to retry.");
   } else {
     glyph.textContent = "◎";
-    label.textContent = "Talk";
-    btn.setAttribute("aria-label", "Voice commands");
+    label.textContent = "Start voice";
+    btn.setAttribute("aria-label", "Start voice conversation");
     btn.setAttribute("aria-pressed", "false");
+    if (stateLabel) stateLabel.textContent = "Ready when you are";
+    if (stateDetail) stateDetail.textContent = "Ask what matters, redirect work, or think out loud.";
     setStatus("");
   }
+}
+
+/* --- supervised work ---------------------------------------------------- */
+
+function renderSupervisor(payload) {
+  const sessions = payload.sessions || payload.agents || [];
+  const counts = payload.counts || {};
+  const assessment = payload.assessment || payload.intervention || null;
+  const count = $("#supervisor-count");
+  const stateEl = $("#supervisor-state");
+  const nextEl = $("#supervisor-next");
+  const evidenceEl = $("#supervisor-evidence");
+  const host = $("#supervisor-agents");
+  if (count) count.textContent = String(counts.live ?? sessions.filter((s) => s.live).length ?? "");
+  if (stateEl) {
+    stateEl.textContent = assessment?.should_intervene
+      ? assessment.intervention_reason || "One session needs you"
+      : `${sessions.length} recent sessions observed · nothing needs interrupting`;
+  }
+  if (nextEl) {
+    nextEl.textContent = assessment?.should_intervene
+      ? assessment.recommended_next_action || ""
+      : "I’ll stay quiet until the work changes in a way that needs judgment.";
+  }
+  if (evidenceEl) {
+    const evidence = Array.isArray(assessment?.evidence) ? assessment.evidence : [];
+    evidenceEl.textContent = evidence.length ? `Evidence: ${evidence.slice(0, 2).join(" · ")}` : "";
+  }
+  if (!host) return;
+  host.textContent = "";
+  for (const session of sessions.slice(0, 6)) {
+    const li = document.createElement("li");
+    const provider = document.createElement("span");
+    provider.className = "agent-provider";
+    provider.textContent = session.surface || session.provider || "agent";
+    const title = document.createElement("span");
+    title.className = "agent-title";
+    title.textContent = session.title || "Untitled session";
+    const sessionState = document.createElement("span");
+    sessionState.className = "agent-state";
+    sessionState.textContent = String(session.state || "unknown").replaceAll("_", " ");
+    li.append(provider, title, sessionState);
+    host.append(li);
+  }
+}
+
+async function loadSupervisor({ force = false } = {}) {
+  const stateEl = $("#supervisor-state");
+  if (stateEl) stateEl.textContent = "Checking Claude, Cursor, and Codex…";
+  try {
+    const suffix = force ? "?force=true" : "";
+    let response = await fetch(`/api/supervisor${suffix}`);
+    if (response.status === 404) response = await fetch(`/api/agents${suffix}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderSupervisor(await response.json());
+  } catch {
+    if (stateEl) stateEl.textContent = "Couldn’t verify agent work right now";
+    const nextEl = $("#supervisor-next");
+    if (nextEl) nextEl.textContent = "I won’t guess. Check again when the local session catalog is reachable.";
+  }
+}
+
+function connectSupervisor() {
+  const stream = new EventSource("/api/session/supervisor/events");
+  stream.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.kind === "supervisor") renderSupervisor(payload);
+    } catch {
+      /* A malformed monitoring frame never breaks the conversation. */
+    }
+  };
 }
 
 const setMicState = () =>
@@ -892,6 +996,8 @@ function init() {
     e.currentTarget.setAttribute("aria-pressed", String(state.muted));
     e.currentTarget.querySelector(".label").textContent = state.muted ? "Muted" : "Speaking on";
   });
+
+  $("#supervisor-refresh")?.addEventListener("click", () => loadSupervisor({ force: true }));
 
   $("#composer").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1016,6 +1122,8 @@ function init() {
   initTheme();
   openSession();
   initIdeas();
+  loadSupervisor();
+  connectSupervisor();
 }
 
 window.addEventListener("pagehide", teardownVoice);

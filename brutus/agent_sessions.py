@@ -7,6 +7,7 @@ Never mutates transcripts or kills processes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -34,7 +35,16 @@ CODEX_DB = CODEX_ROOT / "sqlite" / "codex-dev.db"
 _CACHE: dict[str, Any] = {"at": 0.0, "data": []}
 _CACHE_TTL_S = 45.0
 _RUNTIME_VERSION = 1
-_RUNTIME_STATES = {"active", "idle", "not_loaded"}
+SESSION_STATES = {
+    "running",
+    "waiting",
+    "approval_needed",
+    "blocked",
+    "completed",
+    "failed",
+    "unknown",
+}
+_RUNTIME_STATES = SESSION_STATES | {"active", "idle", "not_loaded"}
 _ACTIVE_STATUS_TTL_S = 45 * 60
 _SETTLED_STATUS_TTL_S = 24 * 3600
 
@@ -148,10 +158,14 @@ def _cursor_title(jsonl: Path) -> str:
     return ""
 
 
-def _cursor_state(jsonl: Path) -> str:
-    """Terminal transcript evidence only; ambiguity stays unknown."""
-    last_role = ""
-    terminal = ""
+def _explicit_transcript_state(jsonl: Path) -> str:
+    """Return lifecycle state only when a structured transcript event proves it.
+
+    Message recency and role order are intentionally ignored: a recently written
+    user message does not prove a worker is running, and an assistant message does
+    not prove that a task is complete.
+    """
+    state = "unknown"
     try:
         with jsonl.open(encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -159,23 +173,77 @@ def _cursor_state(jsonl: Path) -> str:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if obj.get("type") == "turn_ended":
-                    raw = str(obj.get("status") or "").strip().lower()
-                    terminal = {
-                        "success": "completed",
-                        "error": "error",
-                        "aborted": "aborted",
-                    }.get(raw, "unknown")
+                payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+                event_type = str(obj.get("type") or "").strip().lower()
+                payload_type = str(payload.get("type") or "").strip().lower()
+                subtype = str(obj.get("subtype") or payload.get("subtype") or "").strip().lower()
+                status = str(obj.get("status") or payload.get("status") or "").strip().lower()
                 role = str(obj.get("role") or "").strip().lower()
-                if role in ("user", "assistant"):
-                    last_role = role
+
+                # A new turn invalidates terminal evidence from a previous turn,
+                # but it still does not establish liveness by itself.
+                if role == "user" or event_type == "user" or payload_type == "user_message":
+                    state = "unknown"
+                elif event_type == "event_msg" and payload_type == "task_started":
+                    state = "unknown"
+                elif event_type == "turn_started":
+                    state = "unknown"
+                elif event_type == "turn_ended":
+                    state = {
+                        "success": "completed",
+                        "completed": "completed",
+                        "error": "failed",
+                        "failed": "failed",
+                        "aborted": "failed",
+                        "cancelled": "failed",
+                        "canceled": "failed",
+                        "blocked": "blocked",
+                    }.get(status, "unknown")
+                elif event_type == "event_msg" and payload_type == "task_complete":
+                    state = "failed" if status in {"error", "failed"} else "completed"
+                elif event_type == "result":
+                    if obj.get("is_error") is True or subtype in {"error", "failed"}:
+                        state = "failed"
+                    elif subtype in {"success", "completed"}:
+                        state = "completed"
+                elif event_type in {"approval_requested", "permission_request"}:
+                    state = "approval_needed"
+                elif event_type in {"blocked", "task_blocked"} or status == "blocked":
+                    state = "blocked"
     except OSError:
         return "unknown"
-    if terminal:
-        return terminal
-    if last_role == "user":
-        return "waiting"
-    return "unknown"
+    return state
+
+
+def _transcript_observation(path: str | Path) -> tuple[dict[str, int] | None, str]:
+    """Return a resumable byte cursor and a content fingerprint."""
+    p = Path(path)
+    try:
+        stat = p.stat()
+        if not p.is_file():
+            return None, ""
+        with p.open("rb") as f:
+            f.seek(max(0, stat.st_size - 65536))
+            tail = f.read()
+    except OSError:
+        return None, ""
+    cursor = {
+        "version": 1,
+        "device": int(stat.st_dev),
+        "inode": int(stat.st_ino),
+        "offset": int(stat.st_size),
+    }
+    identity = f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:".encode()
+    return cursor, hashlib.sha256(identity + tail).hexdigest()
+
+
+def _attach_observation(row: dict[str, Any]) -> dict[str, Any]:
+    cursor, fingerprint = _transcript_observation(str(row.get("path") or ""))
+    return {
+        **row,
+        "observation_cursor": cursor,
+        "observation_fingerprint": fingerprint,
+    }
 
 
 def _claude_meta(jsonl: Path) -> tuple[str, str]:
@@ -242,7 +310,7 @@ def _scan_cursor(root: Path) -> list[dict[str, Any]]:
             except OSError:
                 continue
             title = _cursor_title(jsonl) or f"Cursor session {sess.name[:8]}"
-            state = _cursor_state(jsonl)
+            state = _explicit_transcript_state(jsonl)
             out.append(
                 {
                     "id": f"cursor:{sess.name}",
@@ -363,8 +431,8 @@ def _scan_claude(
                     "mtime": max(mtime, float(live.get("started_at") or 0)),
                     "age": _age_phrase(max(mtime, float(live.get("started_at") or 0))),
                     "live": bool(live.get("live")),
-                    "state": "running" if live.get("live") else "unknown",
-                    "status_source": "claude_agents" if live.get("live") else "history",
+                    "state": "running" if live.get("live") else _explicit_transcript_state(jsonl),
+                    "status_source": "claude_agents" if live.get("live") else "transcript",
                     "path": str(jsonl),
                     "pid": live.get("pid"),
                 }
@@ -433,7 +501,7 @@ def _load_runtime_statuses(root: Path) -> dict[tuple[str, str], dict[str, Any]]:
             continue
         if (
             version != _RUNTIME_VERSION
-            or surface not in ("codex", "cursor")
+            or surface not in ("codex", "cursor", "claude")
             or not thread_id
             or state not in _RUNTIME_STATES
             or observed_at <= 0
@@ -474,8 +542,15 @@ def _apply_runtime_status(
         return row
     state, live = {
         "active": ("running", True),
-        "idle": ("idle", False),
-        "not_loaded": ("not_loaded", False),
+        "idle": ("waiting", False),
+        "not_loaded": ("unknown", False),
+        "running": ("running", True),
+        "waiting": ("waiting", False),
+        "approval_needed": ("approval_needed", False),
+        "blocked": ("blocked", False),
+        "completed": ("completed", False),
+        "failed": ("failed", False),
+        "unknown": ("unknown", False),
     }[status["state"]]
     return {
         **row,
@@ -523,6 +598,8 @@ def _scan_codex(db_path: Path, root: Path) -> list[dict[str, Any]]:
             continue
         mtime = float(row["source_recency_at"] or row["source_updated_at"] or 0)
         cwd = str(row["cwd"] or "")
+        rollout = rollouts.get(sid)
+        transcript_state = _explicit_transcript_state(rollout) if rollout else "unknown"
         out.append(
             {
                 "id": f"codex:{host_id}:{sid}",
@@ -537,9 +614,9 @@ def _scan_codex(db_path: Path, root: Path) -> list[dict[str, Any]]:
                 "created_at_epoch": float(row["source_created_at"] or 0),
                 "age": _age_phrase(mtime),
                 "live": False,
-                "state": "unknown",
-                "status_source": "catalog",
-                "path": str(rollouts.get(sid) or ""),
+                "state": transcript_state,
+                "status_source": "transcript" if transcript_state != "unknown" else "catalog",
+                "path": str(rollout or ""),
                 "pid": None,
                 "source_kind": str(row["source_kind"] or ""),
                 "source_detail": str(row["source_detail"] or ""),
@@ -592,7 +669,7 @@ def scan_agent_sessions(
             )
         )
     statuses = _load_runtime_statuses(runtime_root)
-    rows = [_apply_runtime_status(row, statuses, now=now) for row in rows]
+    rows = [_attach_observation(_apply_runtime_status(row, statuses, now=now)) for row in rows]
     rows.sort(key=lambda r: (-bool(r.get("live")), -float(r.get("mtime") or 0)))
     _CACHE["at"], _CACHE["data"] = now, rows
     _CACHE["runtime_mtime_ns"] = runtime_mtime_ns
@@ -680,53 +757,122 @@ def active_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-def read_transcript_excerpt(path: str | Path, *, max_chars: int = 6000) -> str:
-    """Capped plain-text excerpt for summarize — never invents content."""
-    p = Path(path)
-    if not p.is_file():
-        return ""
+def _message_excerpt(raw: bytes, *, max_chars: int) -> str:
+    """Extract human/model messages from complete JSONL records."""
     parts: list[str] = []
     total = 0
-    try:
-        with p.open(encoding="utf-8", errors="replace") as f:
-            for i, line in enumerate(f):
-                if i > 200 or total >= max_chars:
-                    break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # Codex rollouts wrap messages in event_msg / response_item
-                # payloads. Unwrap those without broadening what counts as a
-                # human/model message.
-                if obj.get("type") in ("event_msg", "response_item"):
-                    payload = obj.get("payload") or {}
-                    role = payload.get("role") or payload.get("type") or ""
-                    source = payload
-                else:
-                    role = obj.get("role") or obj.get("type") or ""
-                    source = obj
-                if role == "user_message":
-                    role = "user"
-                elif role == "agent_message":
-                    role = "assistant"
-                if role not in ("user", "assistant"):
-                    continue
-                texts = _extract_text_chunks(source.get("message") or source)
-                body = " ".join(t.strip() for t in texts if t and t.strip())
-                body = _USER_QUERY_RE.sub(lambda m: m.group(1), body)
-                body = re.sub(r"\s+", " ", body).strip()
-                if not body:
-                    continue
-                chunk = f"{role}: {body[:800]}"
-                parts.append(chunk)
-                total += len(chunk)
-    except OSError:
-        return ""
+    for raw_line in raw.splitlines():
+        if total >= max_chars:
+            break
+        line = raw_line.decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        # Codex rollouts wrap messages in event_msg / response_item payloads.
+        if obj.get("type") in ("event_msg", "response_item"):
+            payload = obj.get("payload") or {}
+            role = payload.get("role") or payload.get("type") or ""
+            source = payload
+        else:
+            role = obj.get("role") or obj.get("type") or ""
+            source = obj
+        if role == "user_message":
+            role = "user"
+        elif role == "agent_message":
+            role = "assistant"
+        if role not in ("user", "assistant"):
+            continue
+        texts = _extract_text_chunks(source.get("message") or source)
+        body = " ".join(t.strip() for t in texts if t and t.strip())
+        body = _USER_QUERY_RE.sub(lambda m: m.group(1), body)
+        body = re.sub(r"\s+", " ", body).strip()
+        if not body:
+            continue
+        chunk = f"{role}: {body[:800]}"
+        parts.append(chunk)
+        total += len(chunk)
     return "\n".join(parts)[:max_chars]
+
+
+def read_transcript_delta(
+    path: str | Path,
+    *,
+    cursor: dict[str, Any] | None = None,
+    max_chars: int = 6000,
+    max_scan_bytes: int = 1024 * 1024,
+) -> dict[str, Any]:
+    """Read new JSONL content, or a bounded tail on the first observation.
+
+    The returned cursor is safe to persist. Rotation, replacement, truncation,
+    malformed cursors, and oversized deltas fail back to a bounded tail instead
+    of reading an unbounded file or silently skipping replacement content.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return {
+            "ok": False,
+            "excerpt": "",
+            "cursor": None,
+            "fingerprint": "",
+            "reset": False,
+            "truncated": False,
+            "bytes_read": 0,
+        }
+    try:
+        stat = p.stat()
+        size = int(stat.st_size)
+        cursor_matches = bool(
+            isinstance(cursor, dict)
+            and cursor.get("version") == 1
+            and cursor.get("device") == int(stat.st_dev)
+            and cursor.get("inode") == int(stat.st_ino)
+            and isinstance(cursor.get("offset"), int)
+            and 0 <= int(cursor["offset"]) <= size
+        )
+        reset = cursor is not None and not cursor_matches
+        requested_start = int(cursor["offset"]) if cursor_matches else 0
+        start = requested_start
+        truncated = False
+        if size - start > max_scan_bytes:
+            start = size - max_scan_bytes
+            truncated = True
+        with p.open("rb") as f:
+            f.seek(start)
+            raw = f.read(size - start)
+        # Starting in a bounded tail may split a JSON record. Drop that one
+        # partial line; a true incremental cursor always starts at a record end.
+        if start > requested_start or (not cursor_matches and start > 0):
+            _, separator, raw = raw.partition(b"\n")
+            if not separator:
+                raw = b""
+    except OSError:
+        return {
+            "ok": False,
+            "excerpt": "",
+            "cursor": None,
+            "fingerprint": "",
+            "reset": False,
+            "truncated": False,
+            "bytes_read": 0,
+        }
+    next_cursor, fingerprint = _transcript_observation(p)
+    return {
+        "ok": True,
+        "excerpt": _message_excerpt(raw, max_chars=max_chars),
+        "cursor": next_cursor,
+        "fingerprint": fingerprint,
+        "reset": reset,
+        "truncated": truncated,
+        "bytes_read": len(raw),
+    }
+
+
+def read_transcript_excerpt(path: str | Path, *, max_chars: int = 6000) -> str:
+    """Capped tail excerpt for compatibility with existing callers."""
+    return str(read_transcript_delta(path, max_chars=max_chars)["excerpt"])
 
 
 def summarize_transcript(

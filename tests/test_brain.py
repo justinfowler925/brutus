@@ -90,6 +90,8 @@ def test_proposable_matches_the_gate():
         "organize_project",
         "delete_note",
         "ask_cursor",
+        "ask_frontier",
+        "create_linear_ticket",
     }
     assert set(PROPOSABLE) <= set(GATED)
 

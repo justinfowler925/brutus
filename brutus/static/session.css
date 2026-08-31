@@ -1280,3 +1280,283 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; }
   .qcol { max-height: 26rem; }
   body { overflow-y: auto; }
 }
+
+/* --- voice-primary work surface ----------------------------------------
+ *
+ * The conversation is now the focal object. The queue keeps every existing
+ * capability, but lives behind an explicit work tray so hundreds of cards do
+ * not compete with the one intervention Brutus is making now.
+ */
+
+.voice-shell {
+  grid-template-columns: minmax(0, 1.6fr) minmax(20rem, 0.7fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.voice-shell > .voice-stage {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.voice-shell > .supervisor-rail {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.voice-shell > .work-tray {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+.voice-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: 34rem;
+}
+
+.voice-stage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--shine-space-6);
+  padding: var(--shine-space-6);
+  border-bottom: 1px solid var(--shine-color-border);
+}
+
+.voice-presence {
+  display: flex;
+  align-items: center;
+  gap: var(--shine-space-4);
+  min-width: 0;
+}
+
+.voice-presence-ring {
+  width: 3rem;
+  height: 3rem;
+  flex: 0 0 auto;
+  border: 2px solid var(--shine-color-primary);
+  border-radius: var(--shine-radius-full);
+  position: relative;
+}
+
+.voice-presence-ring::after {
+  content: "";
+  position: absolute;
+  inset: var(--shine-space-2);
+  border-radius: var(--shine-radius-full);
+  background: var(--shine-color-primary);
+  opacity: 0.24;
+}
+
+.voice-kicker,
+.voice-current-label {
+  color: var(--shine-color-fg-muted);
+  font-size: var(--shine-text-xs);
+  font-weight: 600;
+  letter-spacing: var(--shine-tracking-caps);
+  text-transform: uppercase;
+}
+
+.voice-presence h2 {
+  font-size: var(--shine-text-xl);
+  font-weight: 600;
+  letter-spacing: var(--shine-tracking-lg);
+}
+
+#voice-state-detail {
+  margin-top: var(--shine-space-1);
+  color: var(--shine-color-fg-muted);
+  font-size: var(--shine-text-sm);
+}
+
+.voice-primary {
+  min-height: 3rem;
+  padding: 0 var(--shine-space-6);
+  border-color: var(--shine-color-primary);
+  background: var(--shine-color-primary);
+  color: var(--shine-color-primary-fg);
+  font-size: var(--shine-text-lg);
+}
+
+.voice-primary:hover { filter: brightness(1.06); }
+
+.voice-primary[aria-pressed="true"] {
+  background: var(--shine-color-bg);
+  color: var(--shine-color-primary-text);
+}
+
+.voice-current {
+  display: grid;
+  gap: var(--shine-space-2);
+  padding: var(--shine-space-4) var(--shine-space-6);
+  border-bottom: 1px solid var(--shine-color-border);
+  background: var(--shine-color-ember-soft);
+}
+
+.voice-current .headline {
+  padding: 0;
+  border: 0;
+  color: var(--shine-color-fg);
+  font-size: var(--shine-text-lg);
+}
+
+.conversation-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 14rem;
+  overflow: hidden;
+}
+
+.conversation-wrap > #conversation { width: 100%; }
+
+.panel-inline {
+  margin: var(--shine-space-4) var(--shine-space-6) 0;
+  padding: var(--shine-space-3);
+  border: 1px solid var(--shine-color-border);
+  border-radius: var(--shine-radius-md);
+}
+
+.panel-inline > h3 {
+  margin-bottom: var(--shine-space-2);
+  color: var(--shine-color-fg-muted);
+  font-size: var(--shine-text-xs);
+  letter-spacing: var(--shine-tracking-caps);
+  text-transform: uppercase;
+}
+
+.supervisor-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shine-space-4);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.supervisor-guidance { flex: 1 1 auto; }
+
+.supervisor-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--shine-space-3);
+  padding: var(--shine-space-4);
+}
+
+.supervisor-state { font-weight: 600; }
+
+.supervisor-next {
+  font-size: var(--shine-text-lg);
+  line-height: var(--shine-leading-relaxed);
+}
+
+.supervisor-evidence {
+  color: var(--shine-color-fg-muted);
+  font-size: var(--shine-text-sm);
+}
+
+.supervisor-body button { min-height: 2.5rem; }
+
+.agent-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shine-space-2);
+  margin: 0;
+  padding: 0 var(--shine-space-4) var(--shine-space-4);
+  list-style: none;
+}
+
+.agent-strip li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--shine-space-2);
+  padding: var(--shine-space-2) 0;
+  border-top: 1px solid var(--shine-color-border);
+  font-size: var(--shine-text-sm);
+}
+
+.agent-provider {
+  color: var(--shine-color-fg-muted);
+  font-family: var(--shine-font-mono);
+  font-size: var(--shine-text-xs);
+  text-transform: uppercase;
+}
+
+.agent-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-state {
+  color: var(--shine-color-fg-muted);
+  font-size: var(--shine-text-xs);
+}
+
+.work-tray {
+  max-height: min(70vh, 48rem);
+}
+
+.work-tray-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--shine-space-3);
+  min-height: 3rem;
+  padding: 0 var(--shine-space-4);
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+}
+
+.work-tray-summary::-webkit-details-marker { display: none; }
+.work-tray-summary::before { content: "+"; color: var(--shine-color-primary-text); }
+.work-tray[open] > .work-tray-summary::before { content: "−"; }
+.work-tray-summary .count { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.work-tray-hint {
+  color: var(--shine-color-fg-muted);
+  font-size: var(--shine-text-sm);
+  font-weight: 400;
+}
+
+.work-tray > h2 { display: none; }
+.work-tray .queue-board { min-height: 24rem; }
+
+.conversation-empty {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--shine-space-3);
+  padding: var(--shine-space-8);
+  text-align: center;
+}
+
+.conversation-empty h2,
+.conversation-empty p { margin: 0; }
+
+.conversation-empty p {
+  max-width: 48ch;
+  color: var(--shine-color-fg-muted);
+}
+
+@media (max-width: 64rem) {
+  .voice-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    height: auto;
+  }
+
+  .voice-shell > .voice-stage,
+  .voice-shell > .supervisor-rail,
+  .voice-shell > .work-tray {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .voice-stage-head { align-items: flex-start; flex-direction: column; }
+  .voice-primary { width: 100%; justify-content: center; }
+  .work-tray-hint { display: none; }
+}

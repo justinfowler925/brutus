@@ -325,6 +325,8 @@ wait_for_http_200 "http://127.0.0.1:$PORT/session" \
   && echo "    /session 200" || { echo "    /session unavailable"; FAIL=1; }
 wait_for_http_200 "http://127.0.0.1:$PORT/mobile" \
   && echo "    /mobile 200" || { echo "    /mobile unavailable"; FAIL=1; }
+wait_for_http_200 "http://127.0.0.1:$PORT/api/supervisor" \
+  && echo "    /api/supervisor 200" || { echo "    /api/supervisor unavailable"; FAIL=1; }
 
 # The pages render from static files and would answer 200 with every database on
 # fire. Read something out of SQLite through the API, because that is the failure
@@ -375,7 +377,7 @@ done
 
 # State must have SURVIVED, not merely exist. An empty notes pad after a deploy
 # is the failure this whole change exists to prevent, and it looks like success.
-for f in memory.sqlite todos.sqlite sessions.sqlite; do
+for f in memory.sqlite todos.sqlite sessions.sqlite supervisor.sqlite; do
   if [ -s "$STATE/$f" ]; then echo "    $f $(du -h "$STATE/$f" | cut -f1)"; else echo "    $f MISSING OR EMPTY"; FAIL=1; fi
 done
 

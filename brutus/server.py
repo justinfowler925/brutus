@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -43,6 +44,7 @@ from .github_evidence import GitHubEvidenceReceiver
 from .linear_surface import linear_work_surface
 from .local_llm import list_models
 from .memory import MemoryStore
+from .model_gateway import judge_with_profile
 from .nucleus import build_nucleus_snapshot, invalidate_nucleus_cache
 from .paths import canon_db_path
 from .projects import scan_projects
@@ -56,6 +58,7 @@ from .security import (
 from .session import SessionStore
 from .session_bus import SessionEventBus, sse
 from .sites import check_sites
+from .supervisor_runtime import SupervisorRuntime
 from .todos import STAGES, TodoStore
 from .ui import BRUTUS_HTML
 from .voice import HAS_WHISPER, save_wav
@@ -278,6 +281,9 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
         # the API, the Zoom feeder, agent promotion. Hooking each entry point
         # instead would mean a new capture route silently arriving unrefined.
         refiner = asyncio.create_task(_refine_backlog_loop(app)) if start_watchdog else None
+        supervisor_task = (
+            asyncio.create_task(_supervisor_loop(app)) if start_watchdog else None
+        )
         slack_capturer = (
             asyncio.create_task(_slack_capture_loop())
             if start_watchdog and cfg.atlas_enabled
@@ -335,7 +341,7 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
         finally:
             if ear is not None:
                 ear.stop()
-            for task in (poller, refiner, slack_capturer):
+            for task in (poller, refiner, supervisor_task, slack_capturer):
                 if task:
                     task.cancel()
             app.state.watchdog.stop()
@@ -392,6 +398,27 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
                 log.debug("refine sweep failed: %s", exc)
             await asyncio.sleep(REFINE_IDLE_SECONDS)
 
+    async def _supervisor_loop(app: FastAPI) -> None:
+        """Observe agent deltas; publish only when the earned intervention changes."""
+        app.state.bus.bind_loop(asyncio.get_running_loop())
+        previous = ""
+        while True:
+            try:
+                payload = await asyncio.to_thread(app.state.supervisor.observe)
+                assessment = payload.get("assessment")
+                signature = json.dumps(assessment or {}, sort_keys=True, default=str)
+                if signature != previous:
+                    previous = signature
+                    app.state.bus.publish(
+                        "supervisor",
+                        {"session_id": "supervisor", **payload},
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — monitoring cannot kill Brutus
+                log.debug("supervisor observation failed: %s", exc)
+            await asyncio.sleep(max(15.0, float(cfg.watchdog_interval_s)))
+
     app = FastAPI(title="Brutus", version="0.3.0", lifespan=lifespan)
     app.state.cfg = cfg
     app.state.client = client
@@ -401,6 +428,15 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
     app.state.github_evidence = None
     memory = MemoryStore()
     app.state.memory = memory
+    supervisor_judge = None
+    if cfg.claude.enabled:
+        supervisor_judge = lambda prompt: judge_with_profile(
+            cfg, "supervisor", prompt, cwd=Path(__file__).resolve().parents[1]
+        )
+    app.state.supervisor = SupervisorRuntime(
+        judge=supervisor_judge,
+        stale_after_seconds=max(60.0, float(cfg.stale_inflight_minutes) * 60)
+    )
 
     # --- conversation sessions -------------------------------------------
     # One store, one manager. The event bus is what lets the screen render
@@ -472,7 +508,11 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
             "local_llm": llm,
             "brain": {
                 "primary": "cursor",
-                "alternate": None,
+                "profiles": {
+                    "conversation": "cursor",
+                    "supervisor": "claude",
+                    "frontier": "codex",
+                },
                 "cursor_enabled": bool(cursor_cfg and cursor_cfg.enabled),
                 # This endpoint runs inside the launchd actor, so it proves the
                 # credential reached the process that will actually call Cursor.
@@ -480,6 +520,9 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
                 # healthy deployment—or bless a process that never loaded its key.
                 "cursor_credential_loaded": cursor_credential_loaded,
                 "cursor_sdk_importable": cursor_sdk_importable,
+                "claude_enabled": bool(cfg.claude and cfg.claude.enabled),
+                "claude_executable": bool(shutil.which("claude")),
+                "codex_executable": bool(shutil.which("codex")),
             },
             "watchdog": wd.snapshot(),
             "voice": {
@@ -1106,6 +1149,11 @@ def create_app(cfg: BrutusCfg | None = None, *, start_watchdog: bool = True) -> 
             "agents": visible,
             "counts": active_counts(merged),
         }
+
+    @app.get("/api/supervisor")
+    async def supervisor_status(request: Request, force: bool = False) -> dict[str, Any]:
+        """One evidence-backed intervention across Claude, Cursor, and Codex."""
+        return await asyncio.to_thread(request.app.state.supervisor.observe, force=force)
 
     @app.patch("/api/agents/{agent_id:path}")
     async def agents_update(agent_id: str, body: dict) -> dict[str, Any]:

@@ -1,8 +1,9 @@
 # Brutus
 
-**Justin’s standalone MacBook coworker.** Brutus uses Cursor for every model
-completion, reads current work directly from Linear, and keeps capture, Canon,
-Zoom, notes, and session state local. Atlas is intentionally ignored: no health
+**Justin’s standalone MacBook coworker.** Voice is the primary work surface.
+Brutus uses explicit Cursor, Claude, and Codex profiles, reads current work
+directly from Linear, and keeps capture, Canon, Zoom, notes, and session state
+local. Atlas is intentionally ignored: no health
 probe, board fallback, chat tool, mutation, UI poll, or tunnel is active.
 
 **Canon model and collaborator runbook:** [`brutus/canon/README.md`](brutus/canon/README.md)
@@ -18,10 +19,21 @@ brutus health
 bash scripts/open-operator.sh   # http://127.0.0.1:8768/ — work surface (focus queue + charts + working set)
 ```
 
-### Conversation brain
+### Voice brain and work supervisor
 
-Cursor is the only conversation and reasoning backend. Claude and the local
-Qwen 8B are not fallbacks; an unavailable Cursor call fails honestly.
+Cursor handles the low-latency conversation profile. Claude judges incremental
+Codex, Cursor, and Claude session evidence into a goal, verified progress,
+blocker or decision, and one recommended action. Codex `gpt-5.6-sol` handles
+frontier Unfog passes; builder work stays with the explicitly selected agent.
+Providers never silently substitute for one another.
+
+The supervisor persists transcript cursors and reassesses only changed work.
+Normal progress is silent. Approval, failure, a blocker, conflicting work,
+stale unfinished work, or a named completion follow-up can earn an interruption.
+New work first passes through the pure Unfog compiler: continue matching
+inflight work, update an exact open ticket, or draft one gated Linear issue.
+Frontier calls and ticket creation execute only after the reviewed proposal is
+approved.
 
 `config.yaml`:
 
@@ -31,6 +43,9 @@ cursor_runner:
   enabled: true
   model: "composer-2.5"
   reasoning_root: "~/.brutus/app"
+claude:
+  enabled: true
+  model: "claude-sonnet-5"
 ```
 
 ### Cursor MCP helpers

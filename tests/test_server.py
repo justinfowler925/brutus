@@ -34,6 +34,19 @@ def test_healthz_reports_cursor_credential_from_actor_process(monkeypatch):
         assert brain["cursor_sdk_importable"] is True
 
 
+def test_supervisor_endpoint_forwards_force_and_returns_structured_snapshot():
+    cfg = BrutusCfg(watchdog_enabled=False)
+    with patch("brutus.server.AtlasClient") as cls:
+        cls.return_value = MagicMock()
+        app = create_app(cfg, start_watchdog=False)
+        expected = {"sessions": [], "counts": {"total": 0}, "assessment": None}
+        app.state.supervisor.observe = MagicMock(return_value=expected)
+        response = TestClient(app).get("/api/supervisor?force=true")
+    assert response.status_code == 200
+    assert response.json() == expected
+    app.state.supervisor.observe.assert_called_once_with(force=True)
+
+
 def test_home_work_surface_no_broken_evidence_hrefs():
     cfg = BrutusCfg(
         atlas6_url="http://127.0.0.1:8767",
@@ -314,6 +327,10 @@ def test_session_ideas_build_plan_markers():
         assert 'id="ideas-list"' in html
         assert 'id="ideas-add"' in html
         assert 'data-cite="spectrum-ai-chat"' in html
+        assert 'data-testid="voice-stage"' in html
+        assert 'data-testid="voice-control"' in html
+        assert 'data-testid="supervisor-guidance"' in html
+        assert 'data-testid="work-tray"' in html
         assert 'id="send" class="primary">Send</button>' in html
         assert '<button type="submit">Capture</button>' in html
         assert "Session slots" in html
@@ -328,6 +345,8 @@ def test_session_ideas_build_plan_markers():
         assert "initIdeas" in js
         assert "ideaDelete" in js
         assert "/api/session/ideas/events" in js
+        assert "/api/supervisor" in js
+        assert "connectSupervisor" in js
 
 
 def test_session_ideas_wave2_markers():

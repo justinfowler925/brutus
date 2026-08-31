@@ -7,7 +7,8 @@ summarizes the result. It never invents facts itself.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from .agent_sessions import (
@@ -15,16 +16,22 @@ from .agent_sessions import (
     filter_cockpit,
     merge_overlays,
     scan_agent_sessions,
-    summarize_transcript,
 )
 from .client import AtlasClient
 from .config import BrutusCfg
 from .cursor_runner import run_cursor_chat
 from .focus import spoken_next_decision
-from .linear_surface import linear_work_surface
+from .linear_surface import (
+    create_linear_ticket,
+    find_linear_ticket_candidates,
+    linear_work_surface,
+)
 from .memory import MemoryStore
+from .model_gateway import judge_with_profile, run_profile
 from .nucleus import build_nucleus_snapshot, invalidate_nucleus_cache, nucleus_view
+from .supervisor_runtime import SupervisorRuntime
 from .todos import STATUSES, Todo, TodoStore
+from .unfog_compiler import UnfogContract, compile_work
 
 ToolFn = Callable[..., dict[str, Any]]
 
@@ -626,34 +633,125 @@ def _organize_project(memory: MemoryStore, project_id: str, **changes: Any) -> d
     return {"ok": True, "project_id": project_id, "overlay": row, "source_records_changed": False}
 
 
-def _summarize_agent_thread(
-    memory: MemoryStore,
-    cfg: BrutusCfg,
+def _assess_agent_thread(
+    supervisor: SupervisorRuntime,
     agent_id: str = "",
     q: str = "",
 ) -> dict[str, Any]:
-    rows = merge_overlays(scan_agent_sessions(), memory.list_agent_overlays())
-    hit = None
-    aid = (agent_id or "").strip()
+    snapshot = supervisor.observe(force=True)
+    rows = snapshot.get("sessions") or []
+    aid = (agent_id or "").strip().casefold()
     qn = (q or "").strip().lower()
-    if aid:
-        hit = next((r for r in rows if r.get("id") == aid or r.get("session_id") == aid), None)
-    elif qn:
-        for r in filter_cockpit(rows, include_hidden=True):
-            blob = f"{r.get('title')} {r.get('cwd')} {r.get('project')}".lower()
-            if qn in blob:
-                hit = r
-                break
+    hit = next(
+        (
+            row for row in rows
+            if (aid and aid in str(row.get("id") or "").casefold())
+            or (qn and qn in f"{row.get('title')} {row.get('id')}".casefold())
+        ),
+        None,
+    )
     if not hit:
         return {"ok": False, "error": "no matching agent thread"}
-    out = summarize_transcript(hit.get("path") or "", cfg=cfg)
-    out["thread"] = {
-        "id": hit.get("id"),
-        "title": hit.get("title"),
-        "surface": hit.get("surface"),
-        "cwd": hit.get("cwd"),
-    }
-    return out
+    return {"ok": True, "thread": hit, "assessment": hit.get("assessment")}
+
+
+def _compile_unfog_work(**kwargs: Any) -> dict[str, Any]:
+    contract = UnfogContract(
+        outcome=kwargs.pop("outcome", ""),
+        target=kwargs.pop("target", ""),
+        premise=kwargs.pop("premise", ""),
+        scope=kwargs.pop("scope", ""),
+        preservation=kwargs.pop("preservation", ""),
+        acceptance=tuple(kwargs.pop("acceptance", ()) or ()),
+        delivery=kwargs.pop("delivery", ""),
+    )
+    decision = compile_work(contract, **kwargs)
+    return {"ok": True, "decision": asdict(decision)}
+
+
+def _ask_frontier(cfg: BrutusCfg, **contract: Any) -> dict[str, Any]:
+    import json
+
+    prompt = (
+        "Resolve this material work question with Unfog. Return an evidence-backed, "
+        "execution-ready recommendation; do not create tickets or change files.\n"
+        + json.dumps(contract, indent=2, sort_keys=True)
+    )
+    return run_profile(cfg, "frontier", prompt, cwd=Path(__file__).resolve().parents[1])
+
+
+def _create_linear_ticket_from_unfog(
+    *,
+    title: str,
+    outcome: str,
+    target: str,
+    premise: str,
+    scope: str,
+    preservation: str,
+    acceptance: list[str],
+    delivery: str,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Recompile against live sources at execution time, then create at most one issue."""
+    contract = UnfogContract(
+        outcome=outcome,
+        target=target,
+        premise=premise,
+        scope=scope,
+        preservation=preservation,
+        acceptance=tuple(acceptance or ()),
+        delivery=delivery,
+    )
+    candidates = find_linear_ticket_candidates(title)
+    normalized = {title.strip().casefold(), outcome.strip().casefold()}
+    active = next(
+        (
+            row
+            for row in scan_agent_sessions()
+            if row.get("live") and str(row.get("title") or "").strip().casefold() in normalized
+        ),
+        None,
+    )
+    decision = compile_work(
+        contract,
+        evidence=evidence or (),
+        existing_tickets=candidates,
+        active_work=(
+            {
+                "work_id": str(active.get("id")),
+                "matches_contract": True,
+                "status": "running",
+                "evidence": "live provider session with exact title",
+            }
+            if active
+            else None
+        ),
+        draft_title=title,
+    )
+    if decision.action != "draft_new_ticket":
+        return {
+            "ok": False,
+            "blocked": True,
+            "error": decision.reason,
+            "decision": asdict(decision),
+        }
+    evidence_lines = [
+        f"- {item.get('claim')}: {item.get('observation')} ({item.get('source')})"
+        for item in (evidence or [])
+    ]
+    description = "\n".join(
+        [
+            "## Outcome", outcome,
+            "## Target", target,
+            "## Premise", premise,
+            "## Scope", scope,
+            "## Preservation", preservation,
+            "## Acceptance", *(f"- {item}" for item in acceptance),
+            "## Delivery", delivery,
+            "## Evidence", *(evidence_lines or ["- No external evidence supplied."]),
+        ]
+    )
+    return create_linear_ticket(title, description)
 
 
 def _canon_snapshot() -> dict[str, Any]:
@@ -713,6 +811,13 @@ def build_default_registry(
 ) -> ToolRegistry:
     memory = memory or MemoryStore()
     todos = todos or TodoStore()
+    runtime_cfg = cfg or BrutusCfg()
+    supervisor_judge = None
+    if runtime_cfg.claude.enabled:
+        supervisor_judge = lambda prompt: judge_with_profile(
+            runtime_cfg, "supervisor", prompt, cwd=Path(__file__).resolve().parents[1]
+        )
+    supervisor = SupervisorRuntime(judge=supervisor_judge)
     reg = ToolRegistry()
     reg.register(
         Tool(
@@ -807,6 +912,52 @@ def build_default_registry(
                     "required": ["message"],
                 },
                 fn=lambda **kwargs: _ask_cursor(cfg or BrutusCfg(), **kwargs),
+            )
+        )
+        reg.register(
+            Tool(
+                name="ask_frontier",
+                description=(
+                    "Run one read-only frontier-model Unfog pass for explicitly material ambiguity, "
+                    "risk, or conflicting evidence. The exact contract is preserved in the receipt."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "outcome": {"type": "string"}, "target": {"type": "string"},
+                        "premise": {"type": "string"}, "scope": {"type": "string"},
+                        "preservation": {"type": "string"},
+                        "acceptance": {"type": "array", "items": {"type": "string"}},
+                        "delivery": {"type": "string"},
+                        "evidence": {"type": "array", "items": {"type": "object"}},
+                        "justification": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["question", "outcome", "target", "premise", "scope", "preservation", "acceptance", "delivery", "justification"],
+                },
+                fn=lambda **kwargs: _ask_frontier(cfg or BrutusCfg(), **kwargs),
+            )
+        )
+        reg.register(
+            Tool(
+                name="create_linear_ticket",
+                description=(
+                    "Create exactly one Linear ticket from a reviewed Unfog contract. "
+                    "This is a gated write and must not be used when matching work or a matching ticket exists."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"}, "outcome": {"type": "string"},
+                        "target": {"type": "string"}, "premise": {"type": "string"},
+                        "scope": {"type": "string"}, "preservation": {"type": "string"},
+                        "acceptance": {"type": "array", "items": {"type": "string"}},
+                        "delivery": {"type": "string"},
+                        "evidence": {"type": "array", "items": {"type": "object"}},
+                    },
+                    "required": ["title", "outcome", "target", "premise", "scope", "preservation", "acceptance", "delivery"],
+                },
+                fn=_create_linear_ticket_from_unfog,
             )
         )
         reg.register(
@@ -1125,10 +1276,10 @@ def build_default_registry(
     )
     reg.register(
         Tool(
-            name="summarize_agent_thread",
+            name="assess_agent_thread",
             description=(
-                "Summarize one Codex, Cursor, or Claude Code thread from its local transcript. "
-                "Pass its exact agent_id or a search string q."
+                "Judge one Codex, Cursor, or Claude session from lifecycle and transcript evidence. "
+                "Returns goal, verified progress, blocker or decision, and one next action; never a raw summary."
             ),
             parameters={
                 "type": "object",
@@ -1137,7 +1288,49 @@ def build_default_registry(
                     "q": {"type": "string", "description": "match title/cwd when id unknown"},
                 },
             },
-            fn=lambda **kwargs: _summarize_agent_thread(memory, cfg or BrutusCfg(), **kwargs),
+            fn=lambda **kwargs: _assess_agent_thread(supervisor, **kwargs),
+        )
+    )
+    reg.register(
+        Tool(
+            name="get_supervised_work",
+            description=(
+                "Observe Codex, Cursor, and Claude sessions incrementally. Return only evidence-backed "
+                "session assessments and ranked interventions; normal progress stays silent."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"force": {"type": "boolean"}, "limit": {"type": "integer"}},
+            },
+            fn=lambda **kwargs: {"ok": True, **supervisor.observe(**kwargs)},
+        )
+    )
+    reg.register(
+        Tool(
+            name="compile_unfog_work",
+            description=(
+                "Compile a complete Unfog contract against active work and evidenced ticket candidates. "
+                "Returns continue, update_existing, draft_new_ticket, frontier, or needs_input; never mutates."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "outcome": {"type": "string"}, "target": {"type": "string"},
+                    "premise": {"type": "string"}, "scope": {"type": "string"},
+                    "preservation": {"type": "string"},
+                    "acceptance": {"type": "array", "items": {"type": "string"}},
+                    "delivery": {"type": "string"},
+                    "evidence": {"type": "array", "items": {"type": "object"}},
+                    "existing_tickets": {"type": "array", "items": {"type": "object"}},
+                    "active_work": {"type": "object"},
+                    "material_ambiguities": {"type": "array", "items": {"type": "string"}},
+                    "material_risks": {"type": "array", "items": {"type": "string"}},
+                    "conflicting_evidence": {"type": "array", "items": {"type": "string"}},
+                    "material_fork": {"type": "string"}, "draft_title": {"type": "string"},
+                },
+                "required": ["outcome", "target", "premise", "scope", "preservation", "acceptance", "delivery"],
+            },
+            fn=_compile_unfog_work,
         )
     )
     reg.register(

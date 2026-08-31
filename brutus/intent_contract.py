@@ -116,7 +116,7 @@ def compile_proposal(tool: str, args: dict[str, Any]) -> IntentContract:
             evidence=evidence,
         )
 
-    if tool in {"ask_atlas6", "ask_claude", "ask_cursor"}:
+    if tool in {"ask_atlas6", "ask_claude", "ask_cursor", "ask_frontier"}:
         _require(tool, a, ("message", "question"))
         backend = tool.removeprefix("ask_")
         return IntentContract(
@@ -125,6 +125,29 @@ def compile_proposal(tool: str, args: dict[str, Any]) -> IntentContract:
             scope="one backend task; no authority beyond the drafted message",
             preserve="unmentioned systems, records, and repositories",
             acceptance=("backend receipt is attached", "claims are backed by artifact or record evidence"),
+            evidence=evidence,
+        )
+
+    if tool == "create_linear_ticket":
+        _require(
+            tool,
+            a,
+            ("title",),
+            ("outcome",),
+            ("target",),
+            ("premise",),
+            ("scope",),
+            ("preservation",),
+            ("delivery",),
+        )
+        if not a.get("acceptance"):
+            raise IntentNotReady("create_linear_ticket needs material intent detail: acceptance")
+        return IntentContract(
+            outcome=f"create one Linear ticket: {_text(a, 'title')}",
+            target="Clearspeed Linear workspace",
+            scope="one new issue whose reviewed description executes verbatim",
+            preserve="existing issues, active sessions, and all unmentioned work",
+            acceptance=("receipt returns one Linear identifier", "receipt title matches the reviewed title"),
             evidence=evidence,
         )
 

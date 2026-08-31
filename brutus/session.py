@@ -356,6 +356,33 @@ class SessionStore:
                 return None
         return self.get_artifact(artifact_id)
 
+    def claim_artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        """Atomically reserve one draft before crossing an external write boundary."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE artifacts SET state='executing' WHERE id=? AND state='draft'",
+                (artifact_id,),
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_artifact(artifact_id)
+
+    def finish_artifact(
+        self, artifact_id: str, *, state: str, result: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Settle an artifact previously reserved by :meth:`claim_artifact`."""
+        if state not in {"executed", "failed"}:
+            raise ValueError("an executing artifact can only finish as executed or failed")
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE artifacts SET state=?, settled_at=?, result=? "
+                "WHERE id=? AND state='executing'",
+                (state, _now(), json.dumps(result) if result is not None else None, artifact_id),
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_artifact(artifact_id)
+
     # --- the whole board, for the screen ----------------------------------
 
     def snapshot(self, session_id: str) -> dict[str, Any]:

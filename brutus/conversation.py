@@ -285,10 +285,19 @@ class ConversationManager:
     ) -> TurnResult:
         """Run a previously-approved artifact. No model between preview and run."""
         artifact = self.store.get_artifact(artifact_id)
-        if not artifact or artifact.get("state") != "draft":
+        if not artifact:
             return self._land(
                 session_id, "fast", "That one already expired — say it again.", turn_id
             )
+        artifact = self.store.claim_artifact(artifact_id)
+        if not artifact:
+            current = self.store.get_artifact(artifact_id) or {}
+            reply = (
+                "That action is already running."
+                if current.get("state") == "executing"
+                else "That one already settled — say it again if you need another run."
+            )
+            return self._land(session_id, "fast", reply, turn_id)
         # THE contract of this whole module: the object that runs is the object
         # that was shown. registry.call receives artifact["args"] verbatim.
         registry = self._registry()
@@ -305,7 +314,7 @@ class ConversationManager:
         succeeded = bool(result.get("ok")) and not inner_failed
 
         state = "executed" if succeeded else "failed"
-        settled = self.store.settle_artifact(artifact_id, state=state, result=result)
+        settled = self.store.finish_artifact(artifact_id, state=state, result=result)
         self.emit("proposal_settled", {"session_id": session_id, "artifact": settled})
         if succeeded and artifact.get("tool") in (
             "delete_note",

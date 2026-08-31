@@ -10,10 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from brutus.agent_sessions import (
+    SESSION_STATES,
     active_counts,
     filter_cockpit,
     merge_overlays,
     read_transcript_excerpt,
+    read_transcript_delta,
     scan_agent_sessions,
     summarize_transcript,
 )
@@ -233,8 +235,8 @@ def test_runtime_status_joins_exact_native_id_and_maps_states(tmp_path: Path):
     )
     by_id = {row["session_id"]: row for row in rows}
     assert (by_id["active-id"]["state"], by_id["active-id"]["live"]) == ("running", True)
-    assert (by_id["idle-id"]["state"], by_id["idle-id"]["live"]) == ("idle", False)
-    assert (by_id["not-loaded-id"]["state"], by_id["not-loaded-id"]["live"]) == ("not_loaded", False)
+    assert (by_id["idle-id"]["state"], by_id["idle-id"]["live"]) == ("waiting", False)
+    assert (by_id["not-loaded-id"]["state"], by_id["not-loaded-id"]["live"]) == ("unknown", False)
     assert by_id["missing-id"]["status_source"] == "catalog"
     assert by_id["active-id"]["status_source"] == "lifecycle_hook"
     assert by_id["active-id"]["status_turn_id"] == "turn-1"
@@ -330,3 +332,106 @@ def test_transcript_excerpt_and_summarize(tmp_path: Path):
     assert out["ok"] is True
     assert out["source"] == "excerpt"
     assert "fix renewals" in out["summary"]
+
+
+def test_normalized_states_require_explicit_evidence_not_recency(tmp_path: Path):
+    cursor = tmp_path / "cursor"
+    project = "Users-justinfowler-Projects-brutus"
+    cases = {
+        "10000000-0000-0000-0000-000000000001": ({"type": "turn_ended", "status": "success"}, "completed"),
+        "10000000-0000-0000-0000-000000000002": ({"type": "turn_ended", "status": "error"}, "failed"),
+        "10000000-0000-0000-0000-000000000003": ({"type": "approval_requested"}, "approval_needed"),
+        "10000000-0000-0000-0000-000000000004": ({"type": "task_blocked"}, "blocked"),
+        # A fresh user message is a deliberate negative control: it proves
+        # neither that a worker is running nor that it is waiting for Justin.
+        "10000000-0000-0000-0000-000000000005": ({"role": "user", "message": {"content": "go"}}, "unknown"),
+    }
+    for sid, (event, _expected) in cases.items():
+        path = _write_cursor_session(cursor, project, sid, f"case {sid}")
+        with path.open("a", encoding="utf-8") as f:
+            if sid.endswith("0005"):
+                f.write(json.dumps({"type": "turn_ended", "status": "success"}) + "\n")
+            f.write(json.dumps(event) + "\n")
+        os.utime(path, (time.time() + 3600, time.time() + 3600))
+
+    runtime = tmp_path / "runtime"
+    _write_runtime_status(runtime, surface="cursor", thread_id="10000000-0000-0000-0000-000000000005", state="active", observed_at=time.time())
+    waiting_sid = "10000000-0000-0000-0000-000000000006"
+    _write_cursor_session(cursor, project, waiting_sid, "wait here")
+    _write_runtime_status(runtime, surface="cursor", thread_id=waiting_sid, state="idle", observed_at=time.time())
+    unknown_sid = "10000000-0000-0000-0000-000000000007"
+    unknown_path = _write_cursor_session(cursor, project, unknown_sid, "recent is not live")
+    os.utime(unknown_path, (time.time() + 7200, time.time() + 7200))
+
+    rows = scan_agent_sessions(
+        cursor_root=cursor,
+        claude_projects=tmp_path / "claude",
+        claude_sessions=tmp_path / "sessions",
+        runtime_status_dir=runtime,
+        force=True,
+    )
+    by_id = {row["session_id"]: row for row in rows}
+    expected = {sid: state for sid, (_event, state) in cases.items()}
+    expected["10000000-0000-0000-0000-000000000005"] = "running"
+    expected[waiting_sid] = "waiting"
+    expected[unknown_sid] = "unknown"
+
+    assert len(expected) == 7, "denominator: seven lifecycle fixtures"
+    assert sum(by_id[sid]["state"] == state for sid, state in expected.items()) == 7
+    assert {by_id[sid]["state"] for sid in expected} == SESSION_STATES
+    assert by_id[unknown_sid]["live"] is False, "future mtime must not manufacture liveness"
+
+
+def test_scan_exposes_observation_cursor_and_fingerprint(tmp_path: Path):
+    cursor = tmp_path / "cursor"
+    session_ids = [f"20000000-0000-0000-0000-00000000000{i}" for i in range(1, 4)]
+    for sid in session_ids:
+        _write_cursor_session(cursor, "Users-justinfowler-Projects-brutus", sid, sid)
+    rows = scan_agent_sessions(
+        cursor_root=cursor,
+        claude_projects=tmp_path / "claude",
+        claude_sessions=tmp_path / "sessions",
+        force=True,
+    )
+    assert len(rows) == 3, "denominator: all three readable transcripts"
+    assert sum(isinstance(row["observation_cursor"], dict) for row in rows) == 3
+    assert sum(len(row["observation_fingerprint"]) == 64 for row in rows) == 3
+
+
+def test_transcript_delta_reads_tail_then_only_new_content(tmp_path: Path):
+    path = tmp_path / "long.jsonl"
+    lines = [
+        {"role": "user", "message": {"content": f"old-{i}"}}
+        for i in range(260)
+    ]
+    lines.append({"role": "assistant", "message": {"content": "LATEST-MARKER"}})
+    path.write_text("\n".join(json.dumps(row) for row in lines) + "\n", encoding="utf-8")
+
+    first = read_transcript_delta(path, max_chars=6000, max_scan_bytes=4096)
+    assert first["ok"] is True
+    assert first["truncated"] is True
+    assert "LATEST-MARKER" in first["excerpt"]
+    assert "old-0\n" not in first["excerpt"]
+
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"role": "user", "message": {"content": "ONLY-NEW"}}) + "\n")
+    second = read_transcript_delta(path, cursor=first["cursor"])
+    assert second["excerpt"] == "user: ONLY-NEW"
+    assert second["reset"] is False
+    unchanged = read_transcript_delta(path, cursor=second["cursor"])
+    assert unchanged["excerpt"] == "", "negative control: unchanged files yield no repeated transcript"
+    assert unchanged["bytes_read"] == 0
+
+
+def test_transcript_delta_resets_safely_after_replacement(tmp_path: Path):
+    path = tmp_path / "rotated.jsonl"
+    path.write_text(json.dumps({"role": "user", "message": {"content": "before"}}) + "\n", encoding="utf-8")
+    first = read_transcript_delta(path)
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_text(json.dumps({"role": "assistant", "message": {"content": "after"}}) + "\n", encoding="utf-8")
+    replacement.replace(path)
+
+    delta = read_transcript_delta(path, cursor=first["cursor"])
+    assert delta["ok"] is True
+    assert delta["reset"] is True
+    assert delta["excerpt"] == "assistant: after"

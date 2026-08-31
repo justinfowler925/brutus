@@ -53,6 +53,8 @@ GATED = frozenset(
         "ask_atlas6",
         "ask_claude",
         "ask_cursor",
+        "ask_frontier",
+        "create_linear_ticket",
         "organize_agent_thread",
         "organize_project",
     }
@@ -155,11 +157,14 @@ def describe(tool: str, args: dict[str, Any]) -> tuple[str, str]:
     if tool == "delete_note":
         target = _short(a.get("q") or a.get("note_id") or "?")
         return (f"Delete idea: “{target}”", f"Delete that idea — {target}?")
-    if tool in ("ask_atlas6", "ask_claude", "ask_cursor"):
+    if tool in ("ask_atlas6", "ask_claude", "ask_cursor", "ask_frontier"):
         return (
             f"Send to {tool.removeprefix('ask_')}: {_short(a.get('message') or a.get('question'))}",
             f"Send that to {tool.removeprefix('ask_')}?",
         )
+    if tool == "create_linear_ticket":
+        title = _short(a.get("title"))
+        return (f"Create one Linear ticket: {title}", f"Create the Linear ticket {title}?")
     if tool == "organize_agent_thread":
         target = _short(a.get("agent_id"))
         changes = ", ".join(f"{key}={_short(value, 60)}" for key, value in a.items() if key != "agent_id")

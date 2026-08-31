@@ -43,9 +43,10 @@ cursor_runner:
     - "~/.brutus/app"
     - "~/Projects/brutus"
 
-# Retained for backward-compatible config parsing; Brutus does not call Claude.
+# Claude supplies structured session judgment. It is never an implicit fallback
+# for conversation, frontier, or builder profiles.
 claude:
-  enabled: false
+  enabled: true
   model: "claude-sonnet-5"
   timeout_s: 120
   max_tokens: 8192

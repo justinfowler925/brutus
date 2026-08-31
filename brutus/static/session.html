@@ -8,22 +8,15 @@
 <link rel="stylesheet" href="/static/shine-tokens.css">
 <link rel="stylesheet" href="/static/session.css">
 </head>
-<body>
-<!--
-  The work is the screen.
-
-  This used to lead with the transcript: 30.8% of a 1920x1080 viewport for the
-  conversation and 21.5% for Thinking, both usually empty, while the queue got
-  12.1% and rendered one card at a time. Raw speech is the least durable thing
-  here — it is the input, not the product. So the pipeline takes the room and the
-  conversation becomes a rail you talk into.
--->
-<main class="shell">
+<body data-cite="spectrum-ai-chat">
+<!-- Voice is the work surface. The transcript is durable evidence, the
+     supervisor is the attention policy, and the queue is supporting detail. -->
+<main class="shell voice-shell">
 
   <header class="topbar">
     <div class="title">
       <h1>Brutus</h1>
-      <p class="tagline">Capture queue — decisions live on <a href="/">Work</a>.</p>
+      <p class="tagline">Live work conversation</p>
     </div>
     <span id="live" class="live" data-connected="false" role="status" aria-live="polite">offline</span>
     <button type="button" id="theme-toggle" aria-pressed="false" aria-label="Toggle light/dark theme">
@@ -32,20 +25,115 @@
     <button type="button" id="mute" aria-pressed="false" aria-label="Toggle spoken replies">
       <span class="label">Speaking on</span>
     </button>
-    <button type="button" id="mic" class="mic" aria-label="Voice commands" aria-pressed="false">
-      <span class="glyph" aria-hidden="true">◎</span><span class="label">Talk</span>
-    </button>
     <button type="button" id="new-session" aria-label="Start a new session">New</button>
   </header>
 
-  <!-- The queue. Largest region on the screen, by design. -->
-  <section class="panel queue" aria-label="Queue">
+  <section class="panel voice-stage" data-testid="voice-stage" aria-label="Live conversation">
+    <header class="voice-stage-head">
+      <div class="voice-presence" aria-live="polite">
+        <span class="voice-presence-ring" aria-hidden="true"></span>
+        <div>
+          <p class="voice-kicker">Brutus is with you</p>
+          <h2 id="voice-state-label">Ready when you are</h2>
+          <p id="voice-state-detail">Ask what matters, redirect work, or think out loud.</p>
+        </div>
+      </div>
+      <button type="button" id="mic" class="mic voice-primary" data-testid="voice-control"
+              aria-label="Start voice conversation" aria-pressed="false">
+        <span class="glyph" aria-hidden="true">◎</span><span class="label">Start voice</span>
+      </button>
+    </header>
+
+    <div class="voice-current" id="voice-current">
+      <span class="voice-current-label">Current attention</span>
+      <p id="board-headline" class="headline" role="status">Loading the work that matters…</p>
+    </div>
+
+    <section class="panel-inline" id="proposals-panel" aria-label="Proposed" hidden>
+      <h3>Proposed <span class="count" id="proposals-count"></span></h3>
+      <div id="proposals" aria-live="polite" role="group" aria-label="Proposed changes">
+        <p class="empty" id="proposals-empty" hidden>Changes show up here before anything runs.</p>
+      </div>
+    </section>
+
+    <section class="panel-inline" id="thinking-panel" aria-label="Thinking" hidden>
+      <h3>Thinking</h3>
+      <div id="thinking" aria-live="polite" role="group" aria-label="Answers being worked on">
+        <p class="empty" id="thinking-empty" hidden>Brutus is working the question.</p>
+      </div>
+    </section>
+
+    <div class="conversation-wrap">
+      <div class="scroll" id="conversation" tabindex="0" role="log" aria-label="Conversation history">
+        <div class="conversation-empty" id="conversation-empty">
+          <h2>Your voice is the work surface</h2>
+          <p>Talk naturally. Brutus will judge the work and answer with one useful next move.</p>
+          <button type="button" data-start-voice>Start talking</button>
+        </div>
+      </div>
+      <button type="button" id="to-latest" class="to-latest" hidden>New messages ↓</button>
+    </div>
+    <p id="status-line" role="status"></p>
+    <form class="composer" id="composer">
+      <label class="sr-only" for="say">Message</label>
+      <textarea id="say" rows="1" placeholder="Message or capture — type when voice is not convenient…" autocomplete="off"
+                aria-describedby="composer-hint"></textarea>
+      <p id="composer-hint" class="sr-only">Press Enter to send, Shift and Enter for a new line.</p>
+      <button type="submit" id="send" class="primary">Send</button>
+    </form>
+  </section>
+
+  <aside class="supervisor-rail" aria-label="Work in motion">
+    <section class="panel supervisor-guidance" data-testid="supervisor-guidance">
+      <h2>Work in motion <span class="count" id="supervisor-count"></span></h2>
+      <div class="supervisor-body" id="supervisor-guidance">
+        <p class="supervisor-state" id="supervisor-state">Checking Claude, Cursor, and Codex…</p>
+        <p class="supervisor-next" id="supervisor-next"></p>
+        <p class="supervisor-evidence" id="supervisor-evidence"></p>
+        <button type="button" id="supervisor-refresh">Check now</button>
+      </div>
+      <ol class="agent-strip" id="supervisor-agents" aria-label="Observed agent sessions"></ol>
+    </section>
+
+    <aside id="ledger-detail" class="panel ledger-detail" aria-label="Thread detail" hidden>
+      <header class="ledger-detail-head">
+        <h3 id="ledger-detail-ticket"></h3>
+        <button type="button" id="ledger-detail-close" aria-label="Close thread detail">close</button>
+      </header>
+      <div class="scroll">
+        <p id="ledger-detail-title" class="ledger-detail-title"></p>
+        <p id="ledger-detail-signal" class="ledger-detail-signal"></p>
+        <dl class="ledger-detail-meta">
+          <div><dt>Age</dt><dd id="ledger-detail-age"></dd></div>
+          <div><dt>Lane</dt><dd id="ledger-detail-lane"></dd></div>
+        </dl>
+        <a id="ledger-detail-link" class="ledger-detail-link" href="#" hidden target="_blank" rel="noopener noreferrer">Open in Linear</a>
+        <div id="ledger-detail-actions" class="ledger-detail-actions" hidden></div>
+        <p class="ledger-detail-hint" id="ledger-detail-hint">Open work only when you need its evidence.</p>
+      </div>
+    </aside>
+
+    <details class="panel captured-details" aria-label="Session slots">
+      <summary>Session memory <span class="count" id="panel-fields-count"></span></summary>
+      <div class="scroll">
+        <p class="empty" id="fields-empty">Facts captured while you talk appear here.</p>
+        <dl id="fields"></dl>
+      </div>
+    </details>
+  </aside>
+
+  <details class="panel queue work-tray" data-testid="work-tray" aria-label="Queue">
+    <summary class="work-tray-summary">
+      <span>Detailed work queue</span>
+      <span class="work-tray-hint">Supporting detail · open when needed</span>
+      <span class="count" id="ideas-count"></span>
+    </summary>
     <h2>
       Queue
       <span id="queue-drafting" class="drafting" hidden>
         <span class="dot" aria-hidden="true"></span><span id="queue-drafting-label"></span>
       </span>
-      <span class="count" id="ideas-count"></span>
+      <span class="count" aria-hidden="true"></span>
     </h2>
 
     <div class="queue-chrome">
@@ -86,88 +174,13 @@
     <div class="queue-board" id="ideas-list" data-testid="queue-board" role="group" aria-label="Work queue by stage">
       <div class="queue-empty" id="ideas-empty" data-testid="queue-empty" hidden></div>
     </div>
-  </section>
+  </details>
 
-  <div class="rail">
-
-    <!-- Proposed and Thinking are hidden until they hold something. They used to
-         cost 24.6% of the viewport standing empty. -->
-    <section class="panel rail-panel" id="proposals-panel" aria-label="Proposed" hidden>
-      <h2>Proposed <span class="count" id="proposals-count"></span></h2>
-      <div class="scroll" id="proposals" aria-live="polite" tabindex="0" role="group" aria-label="Proposed changes">
-        <p class="empty" id="proposals-empty" hidden>Ledger writes and deletes show up here first.</p>
-      </div>
-    </section>
-
-    <section class="panel rail-panel" id="thinking-panel" aria-label="Thinking" hidden>
-      <h2>Thinking</h2>
-      <div class="scroll" id="thinking" aria-live="polite" tabindex="0" role="group" aria-label="Answers being worked on">
-        <p class="empty" id="thinking-empty" hidden>Ask a real question and the answer lands here — it never interrupts.</p>
-      </div>
-    </section>
-
-    <!-- A ledger card you opened. Lives in the rail so answering something does
-         not steal the queue's width. -->
-    <aside id="ledger-detail" class="panel rail-panel ledger-detail" aria-label="Thread detail" hidden>
-      <header class="ledger-detail-head">
-        <h3 id="ledger-detail-ticket"></h3>
-        <button type="button" id="ledger-detail-close" aria-label="Close thread detail">close</button>
-      </header>
-      <div class="scroll">
-        <p id="ledger-detail-title" class="ledger-detail-title"></p>
-        <p id="ledger-detail-signal" class="ledger-detail-signal"></p>
-        <dl class="ledger-detail-meta">
-          <div>
-            <dt>Age</dt>
-            <dd id="ledger-detail-age"></dd>
-          </div>
-          <div>
-            <dt>Lane</dt>
-            <dd id="ledger-detail-lane"></dd>
-          </div>
-        </dl>
-        <a id="ledger-detail-link" class="ledger-detail-link" href="#" hidden target="_blank" rel="noopener noreferrer">Open in Linear</a>
-        <div id="ledger-detail-actions" class="ledger-detail-actions" hidden></div>
-        <p class="ledger-detail-hint" id="ledger-detail-hint">Open a Needs-you card to answer or decide here.</p>
-      </div>
-    </aside>
-
-    <!-- The conversation. Still here, still readable, no longer the main event. -->
-    <section class="panel rail-convo" aria-label="Conversation">
-      <h2>
-        Conversation <span class="count" id="count-turns">0</span>
-        <span id="board-focus" class="focus-chip" hidden>
-          <span id="board-focus-label"></span>
-          <button type="button" id="board-clear" aria-label="Show everything">clear</button>
-        </span>
-      </h2>
-      <p id="board-headline" class="headline" role="status"></p>
-      <div class="scroll" id="conversation" tabindex="0" role="log" aria-label="Conversation history">
-        <p class="empty" id="conversation-empty">Say or type something — the transcript lands here.</p>
-      </div>
-      <button type="button" id="to-latest" class="to-latest" hidden>New messages ↓</button>
-      <p id="status-line" role="status"></p>
-      <form class="composer" id="composer">
-        <label class="sr-only" for="say">Message</label>
-        <textarea id="say" rows="1" placeholder="Message or capture…" autocomplete="off"
-                  aria-describedby="composer-hint"></textarea>
-        <p id="composer-hint" class="sr-only">Press Enter to send, Shift and Enter for a new line.</p>
-        <button type="submit" id="send" class="primary">Send</button>
-      </form>
-    </section>
-
-    <details class="panel captured-details" aria-label="Session slots">
-      <summary>
-        Session slots
-        <span class="count" id="panel-fields-count"></span>
-      </summary>
-      <div class="scroll">
-        <p class="empty" id="fields-empty">Slots this chat fills while you talk — not your queue.</p>
-        <dl id="fields"></dl>
-      </div>
-    </details>
-
-  </div>
+  <span id="count-turns" hidden>0</span>
+  <span id="board-focus" class="focus-chip" hidden>
+    <span id="board-focus-label"></span>
+    <button type="button" id="board-clear" aria-label="Show everything">clear</button>
+  </span>
 
 </main>
 <script src="/static/session.js"></script>

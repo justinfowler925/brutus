@@ -1,6 +1,8 @@
 """The conversation layer: one brain, one transcript, one reply rendered twice."""
 
 import inspect
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -273,7 +275,40 @@ def test_a_settled_artifact_cannot_execute_twice(mgr):
     mgr.client.approve.reset_mock()
     result = mgr.execute_artifact(sid, art["id"])
     mgr.client.approve.assert_not_called()
-    assert "expired" in result.reply
+    assert "already settled" in result.reply
+
+
+def test_concurrent_approvals_execute_external_mutation_once(mgr):
+    sid = mgr.store.open_session()
+    art = _draft(
+        mgr,
+        sid,
+        tool="create_linear_ticket",
+        args={"title": "Voice supervisor", "description": "Reviewed contract"},
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    registry = MagicMock()
+
+    def external_write(_tool, _args):
+        entered.set()
+        assert release.wait(timeout=5)
+        return {"ok": True, "result": {"ok": True, "ticket": "REV-900"}}
+
+    registry.call.side_effect = external_write
+    with patch.object(mgr, "_registry", return_value=registry):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(mgr.execute_artifact, sid, art["id"])
+            assert entered.wait(timeout=5)
+            second = pool.submit(mgr.execute_artifact, sid, art["id"])
+            loser = second.result(timeout=5)
+            release.set()
+            winner = first.result(timeout=5)
+
+    assert registry.call.call_count == 1
+    assert winner.reply.startswith("Done")
+    assert loser.reply == "That action is already running."
+    assert mgr.store.get_artifact(art["id"])["state"] == "executed"
 
 
 # --- rendering ----------------------------------------------------------------

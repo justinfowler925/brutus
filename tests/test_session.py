@@ -163,6 +163,20 @@ def test_an_artifact_can_only_be_settled_once(store):
     assert store.settle_artifact(art["id"], state="executed") is None
 
 
+def test_an_artifact_can_only_be_claimed_once(store):
+    sid = store.open_session()
+    art = store.draft_artifact(
+        sid, kind="gate", tool="create_linear_ticket", args={"title": "One"}
+    )
+    claimed = store.claim_artifact(art["id"])
+    assert claimed is not None
+    assert claimed["state"] == "executing"
+    assert store.claim_artifact(art["id"]) is None
+    finished = store.finish_artifact(art["id"], state="executed", result={"ok": True})
+    assert finished is not None
+    assert finished["state"] == "executed"
+
+
 def test_rejecting_leaves_it_unexecutable(store):
     sid = store.open_session()
     art = store.draft_artifact(sid, kind="gate", tool="approve_gate", args={"ticket": "REV-1"})
